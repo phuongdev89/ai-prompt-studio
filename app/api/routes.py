@@ -23,6 +23,7 @@ class GenerateImageRequest(BaseModel):
     size: Optional[str] = Field("1024x1024", description="Kích thước ảnh")
     quality: Optional[str] = Field("hd", description="Chất lượng ảnh")
     image_detail: Optional[str] = Field("high", description="Mức độ bám sát chi tiết ảnh tham chiếu")
+    provider: Optional[str] = Field(None, description="Nhà cung cấp: 'openai' hoặc 'gemini'")
 
 class SaveGeneratedImageRequest(BaseModel):
     image_data: str = Field(..., description="URL hoặc Base64 ảnh đã tạo")
@@ -149,7 +150,8 @@ def generate_image_for_prompt(prompt_id: str, payload: GenerateImageRequest):
         extra_description=payload.extra_description,
         size=payload.size or "1024x1024",
         quality=payload.quality or "hd",
-        image_detail=payload.image_detail or "high"
+        image_detail=payload.image_detail or "high",
+        provider=payload.provider
     )
 
     if not success:
@@ -194,3 +196,23 @@ def save_generated_image_endpoint(prompt_id: str, payload: SaveGeneratedImageReq
 @router.get("/stats/")
 def get_stats():
     return PromptRepository.get_stats()
+
+@router.get("/config/providers")
+@router.get("/config/providers/")
+def get_providers_config():
+    from app.config import get_ai_config
+    cfg = get_ai_config()
+    return {
+        "active_provider": cfg.get("provider", "openai"),
+        "openai": {
+            "has_key": bool(cfg.get("api_key")),
+            "base_url": cfg.get("base_url"),
+            "chat_model": cfg.get("chat_model"),
+            "image_model": cfg.get("image_model")
+        },
+        "gemini": {
+            "has_key": bool(cfg.get("gemini_api_key")),
+            "chat_model": cfg.get("gemini_chat_model", "gemini-2.0-flash"),
+            "image_model": cfg.get("gemini_image_model", "imagen-3.0-generate-002")
+        }
+    }

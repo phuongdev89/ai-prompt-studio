@@ -1047,6 +1047,58 @@ let currentRefImageData = null;
 let currentGeneratedImageData = null;
 let genTimerInterval = null;
 let genTimerSeconds = 0;
+let currentGenProvider = 'openai';
+let providerConfigCache = null;
+
+async function fetchProviderConfig() {
+    try {
+        const res = await fetch('/api/config/providers');
+        if (res.ok) {
+            providerConfigCache = await res.json();
+            if (providerConfigCache.active_provider) {
+                setGenProvider(providerConfigCache.active_provider, false);
+            }
+        }
+    } catch (e) {
+        console.error('Failed to fetch provider config:', e);
+    }
+}
+
+function setGenProvider(provider, notify = true) {
+    currentGenProvider = provider;
+    const btnOpenAI = document.getElementById('btnProviderOpenAI');
+    const btnGemini = document.getElementById('btnProviderGemini');
+    const badge = document.getElementById('genProviderInfoBadge');
+
+    if (provider === 'gemini') {
+        if (btnOpenAI) {
+            btnOpenAI.className = 'px-3 py-1.5 rounded-lg font-medium transition flex items-center gap-1.5 text-slate-400 hover:text-white';
+        }
+        if (btnGemini) {
+            btnGemini.className = 'px-3 py-1.5 rounded-lg font-medium transition flex items-center gap-1.5 bg-gradient-to-r from-amber-600 to-orange-600 text-white shadow';
+        }
+        if (badge) {
+            const imgModel = providerConfigCache?.gemini?.image_model || 'imagen-3.0-generate-002';
+            badge.innerText = `Google Gemini (${imgModel})`;
+            badge.className = 'text-[11px] font-mono px-2 py-0.5 rounded bg-amber-500/10 text-amber-300 border border-amber-500/30';
+        }
+        if (notify && providerConfigCache && !providerConfigCache.gemini.has_key) {
+            showGenError('Lưu ý: GEMINI_API_KEY chưa có giá trị trong .env. Vui lòng nhập API Key của Gemini vào .env trước khi tạo ảnh.');
+        }
+    } else {
+        if (btnOpenAI) {
+            btnOpenAI.className = 'px-3 py-1.5 rounded-lg font-medium transition flex items-center gap-1.5 bg-indigo-600 text-white shadow';
+        }
+        if (btnGemini) {
+            btnGemini.className = 'px-3 py-1.5 rounded-lg font-medium transition flex items-center gap-1.5 text-slate-400 hover:text-white';
+        }
+        if (badge) {
+            const imgModel = providerConfigCache?.openai?.image_model || 'Custom Router';
+            badge.innerText = `Custom OpenAI (${imgModel})`;
+            badge.className = 'text-[11px] font-mono px-2 py-0.5 rounded bg-indigo-500/10 text-indigo-300 border border-indigo-500/30';
+        }
+    }
+}
 
 function getCurrentPromptCode() {
     if (!currentPromptDetail) return "";
@@ -1088,6 +1140,9 @@ async function openGenerateImageModal(promptId = null) {
     if (badge) {
         badge.innerText = `#${(currentPromptId || 'PROMPT').toUpperCase()}`;
     }
+
+    // Refresh provider configuration status
+    await fetchProviderConfig();
 
     // Populate current prompt text
     const promptInput = document.getElementById('genPromptText');
@@ -1290,12 +1345,13 @@ async function submitGenerateImage() {
     // Timer counter
     genTimerSeconds = 0;
     const timerEl = document.getElementById('genLoadingTimer');
-    if (timerEl) timerEl.innerText = 'Đang kết nối tới mô hình AI trong .env (0s)...';
+    const providerName = currentGenProvider === 'gemini' ? 'Google Gemini Official API' : 'Custom OpenAI Router';
+    if (timerEl) timerEl.innerText = `Đang kết nối tới ${providerName} (0s)...`;
     if (genTimerInterval) clearInterval(genTimerInterval);
     genTimerInterval = setInterval(() => {
         genTimerSeconds++;
         if (timerEl) {
-            timerEl.innerText = `Đang kết nối tới mô hình AI trong .env (${genTimerSeconds}s)...`;
+            timerEl.innerText = `Đang kết nối tới ${providerName} (${genTimerSeconds}s)...`;
         }
     }, 1000);
 
@@ -1309,7 +1365,8 @@ async function submitGenerateImage() {
                 extra_description: extraDesc,
                 size: genSize,
                 quality: genQuality,
-                image_detail: genDetail
+                image_detail: genDetail,
+                provider: currentGenProvider
             })
         });
 
