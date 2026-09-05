@@ -117,6 +117,8 @@ function initEventListeners() {
             closeLightbox();
             closeCreateModal();
             closeGenerateImageModal();
+            closeImproveModal();
+            closeAddMediaModal();
         } else if (isLightboxOpen) {
             if (e.key === '+' || e.key === '=' || e.code === 'NumpadAdd') {
                 e.preventDefault();
@@ -153,6 +155,61 @@ function initEventListeners() {
             const files = dt && dt.files;
             if (files && files.length > 0) {
                 processRefImageFile(files[0]);
+            }
+        });
+    }
+
+    // Create Modal Image Dropzone setup
+    const createDropzone = document.getElementById('createImageDropzone');
+    if (createDropzone) {
+        ['dragenter', 'dragover'].forEach(eventName => {
+            createDropzone.addEventListener(eventName, (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                createDropzone.classList.add('border-brand-500', 'bg-brand-500/10');
+            });
+        });
+        ['dragleave', 'drop'].forEach(eventName => {
+            createDropzone.addEventListener(eventName, (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                createDropzone.classList.remove('border-brand-500', 'bg-brand-500/10');
+            });
+        });
+        createDropzone.addEventListener('drop', (e) => {
+            const dt = e.dataTransfer;
+            const files = dt && dt.files;
+            if (files && files.length > 0) {
+                processNewPromptFiles(files);
+            }
+        });
+    }
+
+    // Add Media Modal Dropzone setup
+    const addMediaDropzone = document.getElementById('addMediaDropzone');
+    if (addMediaDropzone) {
+        ['dragenter', 'dragover'].forEach(eventName => {
+            addMediaDropzone.addEventListener(eventName, (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                addMediaDropzone.classList.add('border-brand-500', 'bg-brand-500/10');
+            });
+        });
+        ['dragleave'].forEach(eventName => {
+            addMediaDropzone.addEventListener(eventName, (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                addMediaDropzone.classList.remove('border-brand-500', 'bg-brand-500/10');
+            });
+        });
+        addMediaDropzone.addEventListener('drop', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            addMediaDropzone.classList.remove('border-brand-500', 'bg-brand-500/10');
+            const dt = e.dataTransfer;
+            const files = dt && dt.files;
+            if (files && files.length > 0) {
+                processAddMediaFiles(files);
             }
         });
     }
@@ -261,12 +318,6 @@ function renderPromptList(items) {
                         #${idx + 1}
                     </span>
                     <div class="flex items-center gap-1.5">
-                        <button onclick="event.stopPropagation(); openGenerateImageModal('${item.id}');"
-                                title="Tạo ảnh với prompt này"
-                                class="opacity-0 group-hover:opacity-100 px-1.5 py-0.5 rounded bg-purple-500/20 hover:bg-purple-600 text-purple-300 hover:text-white text-[10px] font-medium transition flex items-center gap-1 border border-purple-500/30 active:scale-95">
-                            <i class="fa-solid fa-wand-magic-sparkles text-[9px]"></i>
-                            <span>Tạo ảnh</span>
-                        </button>
                         ${imgCount > 0 ? `
                             <span class="text-[10px] px-1.5 py-0.5 rounded bg-dark-900/90 text-amber-400/90 border border-amber-500/20 flex items-center gap-1">
                                 <i class="fa-solid fa-image text-[9px]"></i> ${imgCount}
@@ -283,6 +334,50 @@ function renderPromptList(items) {
             </div>
         `;
     }).join('');
+}
+
+// ==========================================
+// Detail Pane Loading Backdrop Helpers
+// ==========================================
+let detailLoadingStartTime = 0;
+
+function showDetailLoading() {
+    const backdrop = document.getElementById('detailLoadingBackdrop');
+    const card = document.getElementById('detailLoadingCard');
+    if (!backdrop) return;
+    detailLoadingStartTime = Date.now();
+    backdrop.classList.remove('hidden', 'pointer-events-none');
+    requestAnimationFrame(() => {
+        backdrop.classList.remove('opacity-0');
+        backdrop.classList.add('opacity-100');
+        if (card) {
+            card.classList.remove('scale-95');
+            card.classList.add('scale-100');
+        }
+    });
+}
+
+function hideDetailLoading(minDuration = 120) {
+    const backdrop = document.getElementById('detailLoadingBackdrop');
+    const card = document.getElementById('detailLoadingCard');
+    if (!backdrop) return;
+
+    const elapsed = Date.now() - detailLoadingStartTime;
+    const remaining = Math.max(0, minDuration - elapsed);
+
+    setTimeout(() => {
+        backdrop.classList.remove('opacity-100');
+        backdrop.classList.add('opacity-0');
+        if (card) {
+            card.classList.remove('scale-100');
+            card.classList.add('scale-95');
+        }
+        setTimeout(() => {
+            if (backdrop.classList.contains('opacity-0')) {
+                backdrop.classList.add('hidden', 'pointer-events-none');
+            }
+        }, 200);
+    }, remaining);
 }
 
 async function selectPrompt(promptId, updateHash = true) {
@@ -312,6 +407,9 @@ async function selectPrompt(promptId, updateHash = true) {
         if (sidebarOverlay) sidebarOverlay.classList.add('hidden');
     }
 
+    // Hiển thị loading có backdrop ở khung bên phải
+    showDetailLoading();
+
     try {
         const res = await fetch(`/api/prompts/${promptId}`);
         if (!res.ok) throw new Error('Failed to fetch prompt detail');
@@ -319,6 +417,9 @@ async function selectPrompt(promptId, updateHash = true) {
         renderDetail(currentPromptDetail);
     } catch (err) {
         console.error('Error fetching prompt detail:', err);
+        showToast('Lỗi khi tải chi tiết câu lệnh');
+    } finally {
+        hideDetailLoading();
     }
 }
 
@@ -745,11 +846,207 @@ function copyCurrentPrompt() {
     });
 }
 
+// ==========================================
+// AI Generate Title Helper
+// ==========================================
+async function generateTitleAI() {
+    if (!currentPromptId) {
+        showToast('Vui lòng chọn một câu lệnh trước');
+        return;
+    }
+
+    const btn = document.getElementById('btnGenerateTitleAI');
+    if (!btn) return;
+
+    const originalHtml = btn.innerHTML;
+    btn.disabled = true;
+    btn.innerHTML = '<i class="fa-solid fa-circle-notch fa-spin text-[11px] text-amber-300"></i><span>Đang đặt tên...</span>';
+
+    try {
+        const res = await fetch(`/api/prompts/${currentPromptId}/suggest-title`, {
+            method: 'POST'
+        });
+
+        if (!res.ok) {
+            const err = await res.json().catch(() => ({}));
+            throw new Error(err.detail || 'Lỗi khi gọi AI gợi ý tiêu đề');
+        }
+
+        const data = await res.json();
+        const newTitle = data.title;
+
+        if (newTitle) {
+            // Update title in detail view
+            const titleEl = document.getElementById('currentPromptTitle');
+            if (titleEl) {
+                titleEl.innerText = newTitle;
+            }
+
+            // Update in memory states
+            if (currentPromptDetail) {
+                currentPromptDetail.title = newTitle;
+            }
+            const found = currentPromptsList.find(p => p.id === currentPromptId);
+            if (found) {
+                found.title = newTitle;
+            }
+
+            // Update sidebar card text
+            const cardTitle = document.querySelector(`#prompt-card-${currentPromptId} h4`);
+            if (cardTitle) {
+                cardTitle.innerText = newTitle;
+            }
+
+            showToast(`AI đã áp dụng tiêu đề mới: "${newTitle}"`);
+        }
+    } catch (err) {
+        console.error('generateTitleAI error:', err);
+        showToast(`Lỗi: ${err.message}`);
+    } finally {
+        btn.disabled = false;
+        btn.innerHTML = originalHtml;
+    }
+}
+
+
+// ==========================================
+// Create Prompt: File Upload & Link Helpers
+// ==========================================
+let newPromptUploadedFiles = []; // Array of { name: str, size: number, dataUrl: str }
+let currentCreateMediaTab = 'upload';
+
+function formatFileSize(bytes) {
+    if (!bytes || bytes === 0) return '0 B';
+    const k = 1024;
+    const sizes = ['B', 'KB', 'MB', 'GB'];
+    const i = Math.floor(Math.log(bytes) / Math.log(k));
+    return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
+}
+
+function setCreateMediaTab(tab) {
+    currentCreateMediaTab = tab;
+    const btnUpload = document.getElementById('btnCreateTabUpload');
+    const btnUrl = document.getElementById('btnCreateTabUrl');
+    const uploadSec = document.getElementById('createUploadSection');
+    const urlSec = document.getElementById('createUrlSection');
+
+    if (tab === 'upload') {
+        if (btnUpload) btnUpload.className = 'px-2.5 py-1 rounded-md bg-dark-700 text-brand-400 font-medium transition flex items-center gap-1.5';
+        if (btnUrl) btnUrl.className = 'px-2.5 py-1 rounded-md text-slate-400 hover:text-white transition flex items-center gap-1.5';
+        if (uploadSec) uploadSec.classList.remove('hidden');
+        if (urlSec) urlSec.classList.add('hidden');
+    } else {
+        if (btnUrl) btnUrl.className = 'px-2.5 py-1 rounded-md bg-dark-700 text-brand-400 font-medium transition flex items-center gap-1.5';
+        if (btnUpload) btnUpload.className = 'px-2.5 py-1 rounded-md text-slate-400 hover:text-white transition flex items-center gap-1.5';
+        if (urlSec) urlSec.classList.remove('hidden');
+        if (uploadSec) uploadSec.classList.add('hidden');
+    }
+}
+
+function handleNewPromptFiles(event) {
+    const files = event.target.files;
+    if (files && files.length > 0) {
+        processNewPromptFiles(files);
+    }
+    event.target.value = '';
+}
+
+function processNewPromptFiles(files) {
+    const validImageTypes = ['image/jpeg', 'image/png', 'image/webp', 'image/gif', 'image/svg+xml'];
+    let errorMsg = null;
+
+    Array.from(files).forEach(file => {
+        if (!validImageTypes.includes(file.type) && !file.name.match(/\.(jpg|jpeg|png|webp|gif|svg)$/i)) {
+            errorMsg = `Tệp "${file.name}" không phải định dạng ảnh hợp lệ (PNG, JPG, WEBP, GIF).`;
+            return;
+        }
+        if (file.size > 15 * 1024 * 1024) {
+            errorMsg = `Ảnh "${file.name}" quá lớn (vượt quá 15MB).`;
+            return;
+        }
+
+        const reader = new FileReader();
+        reader.onload = (e) => {
+            newPromptUploadedFiles.push({
+                name: file.name,
+                size: file.size,
+                dataUrl: e.target.result
+            });
+            renderNewPromptFilesPreview();
+        };
+        reader.readAsDataURL(file);
+    });
+
+    if (errorMsg) {
+        showToast(errorMsg);
+    }
+}
+
+function renderNewPromptFilesPreview() {
+    const previewBox = document.getElementById('createUploadedPreviewContainer');
+    const thumbnails = document.getElementById('createUploadedThumbnails');
+    const countEl = document.getElementById('createUploadedCount');
+    const tabLabel = document.getElementById('labelTabUpload');
+
+    if (!previewBox || !thumbnails) return;
+
+    if (tabLabel) {
+        tabLabel.innerText = newPromptUploadedFiles.length > 0 ? `Tải ảnh lên (${newPromptUploadedFiles.length})` : 'Tải ảnh lên';
+    }
+
+    if (newPromptUploadedFiles.length === 0) {
+        previewBox.classList.add('hidden');
+        thumbnails.innerHTML = '';
+        return;
+    }
+
+    previewBox.classList.remove('hidden');
+    if (countEl) {
+        countEl.innerText = `${newPromptUploadedFiles.length} ảnh đã chọn`;
+    }
+
+    thumbnails.innerHTML = newPromptUploadedFiles.map((fileObj, idx) => `
+        <div class="relative group/thumb flex-shrink-0 w-16 h-16 rounded-xl overflow-hidden border border-dark-700 bg-dark-900 shadow">
+            <img src="${fileObj.dataUrl}" alt="${escapeHtml(fileObj.name)}" class="w-full h-full object-cover">
+            <button type="button" onclick="removeNewPromptFile(${idx})"
+                    title="Gỡ ảnh này"
+                    class="absolute top-1 right-1 w-5 h-5 rounded-full bg-black/80 hover:bg-rose-600 text-white text-[10px] flex items-center justify-center transition shadow">
+                <i class="fa-solid fa-xmark"></i>
+            </button>
+            <div class="absolute bottom-0 inset-x-0 bg-dark-900/80 px-1 py-0.5 text-[9px] text-slate-300 font-mono truncate text-center pointer-events-none">
+                ${formatFileSize(fileObj.size)}
+            </div>
+        </div>
+    `).join('');
+}
+
+function removeNewPromptFile(index) {
+    if (index >= 0 && index < newPromptUploadedFiles.length) {
+        newPromptUploadedFiles.splice(index, 1);
+        renderNewPromptFilesPreview();
+    }
+}
+
+function clearAllNewPromptFiles() {
+    newPromptUploadedFiles = [];
+    const fileInput = document.getElementById('newImageFileInput');
+    if (fileInput) fileInput.value = '';
+    renderNewPromptFilesPreview();
+}
+
 function openCreateModal() {
     const modal = document.getElementById('createModal');
     if (modal) {
         modal.classList.remove('hidden');
-        document.getElementById('newPromptInput').focus();
+        clearAllNewPromptFiles();
+        setCreateMediaTab('upload');
+        const mediaInput = document.getElementById('newMediaInput');
+        if (mediaInput) mediaInput.value = '';
+        const promptInput = document.getElementById('newPromptInput');
+        if (promptInput) {
+            promptInput.value = '';
+            promptInput.focus();
+        }
     }
 }
 
@@ -758,6 +1055,7 @@ function closeCreateModal() {
     if (modal) {
         modal.classList.add('hidden');
     }
+    clearAllNewPromptFiles();
 }
 
 async function submitCreatePrompt(event) {
@@ -769,7 +1067,7 @@ async function submitCreatePrompt(event) {
     const submitBtn = document.getElementById('submitCreateBtn');
 
     const promptVal = promptInput.value.trim();
-    const mediaVal = mediaInput.value.trim();
+    const mediaVal = mediaInput ? mediaInput.value.trim() : '';
 
     if (!promptVal) {
         showToast('Vui lòng nhập nội dung câu lệnh');
@@ -780,12 +1078,15 @@ async function submitCreatePrompt(event) {
     submitBtn.innerHTML = '<i class="fa-solid fa-circle-notch fa-spin"></i> <span>Đang lưu...</span>';
 
     try {
+        const uploadedBase64List = newPromptUploadedFiles.map(f => f.dataUrl);
+
         const res = await fetch('/api/prompts', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
                 prompt: promptVal,
-                media: mediaVal
+                media: mediaVal,
+                images: uploadedBase64List
             })
         });
 
@@ -797,8 +1098,9 @@ async function submitCreatePrompt(event) {
         const newPrompt = await res.json();
         
         // Reset form & close modal
-        mediaInput.value = '';
+        if (mediaInput) mediaInput.value = '';
         promptInput.value = '';
+        clearAllNewPromptFiles();
         closeCreateModal();
 
         // Refresh stats & list, select newly created prompt
@@ -814,6 +1116,7 @@ async function submitCreatePrompt(event) {
         submitBtn.innerHTML = '<i class="fa-solid fa-plus"></i> <span>Thêm câu lệnh</span>';
     }
 }
+
 
 function filterByTag(tag) {
     currentTag = tag;
@@ -1515,3 +1818,977 @@ async function saveGeneratedImageToRecord() {
         btnSave.innerHTML = '<i class="fa-solid fa-floppy-disk text-sm"></i><span>Lưu vào bản ghi này</span>';
     }
 }
+
+// ==========================================
+// AI Prompt Improvement Logic
+// ==========================================
+let currentImproveProvider = 'openai';
+let currentImproveResult = null;
+let improveTimerInterval = null;
+let improveTimerSeconds = 0;
+let isOriginalPromptCollapsed = false;
+
+function setImproveProvider(provider) {
+    currentImproveProvider = provider;
+    const btnOpenAI = document.getElementById('btnImproveProviderOpenAI');
+    const btnGemini = document.getElementById('btnImproveProviderGemini');
+    const badge = document.getElementById('improveProviderInfoBadge');
+
+    if (provider === 'gemini') {
+        if (btnOpenAI) {
+            btnOpenAI.className = 'px-3 py-1.5 rounded-lg font-medium transition flex items-center gap-1.5 text-slate-400 hover:text-white';
+        }
+        if (btnGemini) {
+            btnGemini.className = 'px-3 py-1.5 rounded-lg font-medium transition flex items-center gap-1.5 bg-gradient-to-r from-amber-600 to-orange-600 text-white shadow';
+        }
+        if (badge) {
+            const chatModel = providerConfigCache?.gemini?.chat_model || 'gemini-2.0-flash';
+            badge.innerText = `Google Gemini (${chatModel})`;
+            badge.className = 'text-[11px] font-mono px-2 py-0.5 rounded bg-amber-500/10 text-amber-300 border border-amber-500/30';
+        }
+    } else {
+        if (btnOpenAI) {
+            btnOpenAI.className = 'px-3 py-1.5 rounded-lg font-medium transition flex items-center gap-1.5 bg-emerald-600 text-white shadow';
+        }
+        if (btnGemini) {
+            btnGemini.className = 'px-3 py-1.5 rounded-lg font-medium transition flex items-center gap-1.5 text-slate-400 hover:text-white';
+        }
+        if (badge) {
+            const chatModel = providerConfigCache?.openai?.chat_model || 'Custom Router';
+            badge.innerText = `Custom OpenAI (${chatModel})`;
+            badge.className = 'text-[11px] font-mono px-2 py-0.5 rounded bg-emerald-500/10 text-emerald-300 border border-emerald-500/30';
+        }
+    }
+}
+
+async function openImproveModal(promptId = null) {
+    if (promptId && promptId !== currentPromptId) {
+        await selectPrompt(promptId, true);
+    }
+
+    if (!currentPromptDetail && currentPromptId) {
+        try {
+            const res = await fetch(`/api/prompts/${currentPromptId}`);
+            if (res.ok) currentPromptDetail = await res.json();
+        } catch (e) {
+            console.error('Failed to load current prompt detail:', e);
+        }
+    }
+
+    // Refresh provider config cache
+    await fetchProviderConfig();
+    if (providerConfigCache?.active_provider) {
+        setImproveProvider(providerConfigCache.active_provider);
+    } else {
+        setImproveProvider('openai');
+    }
+
+    // Badge
+    const badge = document.getElementById('improvePromptBadge');
+    if (badge) {
+        badge.innerText = `#${(currentPromptId || 'PROMPT').toUpperCase()}`;
+    }
+
+    // Original Prompt Text
+    const origCode = getCurrentPromptCode();
+    const origDisplay = document.getElementById('improveOriginalPromptText');
+    if (origDisplay) {
+        origDisplay.innerText = origCode || '(Không có nội dung câu lệnh)';
+    }
+
+    // Reset instruction input
+    const instructionInput = document.getElementById('improveInstructionInput');
+    if (instructionInput) {
+        instructionInput.value = '';
+    }
+
+    // Reset error, loading, and results
+    document.getElementById('improveErrorBanner').classList.add('hidden');
+    document.getElementById('improveLoadingState').classList.add('hidden');
+    document.getElementById('improveResultSection').classList.add('hidden');
+    currentImproveResult = null;
+
+    // Reset buttons
+    const btnSubmit = document.getElementById('btnSubmitImprove');
+    if (btnSubmit) {
+        btnSubmit.disabled = false;
+        document.getElementById('btnSubmitImproveText').innerText = 'Gửi AI cải tiến';
+    }
+
+    const btnOverwrite = document.getElementById('btnImproveOverwrite');
+    const btnNewVersion = document.getElementById('btnImproveNewVersion');
+    if (btnOverwrite) btnOverwrite.disabled = true;
+    if (btnNewVersion) btnNewVersion.disabled = true;
+
+    // Show modal
+    const modal = document.getElementById('improvePromptModal');
+    if (modal) {
+        modal.classList.remove('hidden');
+    }
+
+    setTimeout(() => {
+        if (instructionInput) instructionInput.focus();
+    }, 150);
+}
+
+function closeImproveModal() {
+    const modal = document.getElementById('improvePromptModal');
+    if (modal) {
+        modal.classList.add('hidden');
+    }
+    if (improveTimerInterval) {
+        clearInterval(improveTimerInterval);
+        improveTimerInterval = null;
+    }
+}
+
+function toggleImproveOriginalPrompt() {
+    isOriginalPromptCollapsed = !isOriginalPromptCollapsed;
+    const wrapper = document.getElementById('improveOriginalPromptWrapper');
+    const icon = document.getElementById('toggleOrigPromptIcon');
+    const text = document.getElementById('toggleOrigPromptText');
+    if (isOriginalPromptCollapsed) {
+        if (wrapper) wrapper.classList.add('hidden');
+        if (icon) icon.className = 'fa-solid fa-chevron-down text-[10px]';
+        if (text) text.innerText = 'Xem chi tiết';
+    } else {
+        if (wrapper) wrapper.classList.remove('hidden');
+        if (icon) icon.className = 'fa-solid fa-chevron-up text-[10px]';
+        if (text) text.innerText = 'Thu gọn';
+    }
+}
+
+function appendImproveSuggestion(snippet) {
+    const input = document.getElementById('improveInstructionInput');
+    if (!input) return;
+    if (!input.value.trim()) {
+        input.value = snippet;
+    } else {
+        input.value = input.value.trim() + ' ' + snippet;
+    }
+    input.focus();
+}
+
+function showImproveError(msg) {
+    const banner = document.getElementById('improveErrorBanner');
+    const text = document.getElementById('improveErrorText');
+    if (banner && text) {
+        text.innerText = msg || 'Đã xảy ra lỗi khi cải tiến prompt.';
+        banner.classList.remove('hidden');
+    }
+}
+
+async function submitImprovePrompt() {
+    if (!currentPromptId) {
+        showToast('Vui lòng chọn một bản ghi prompt trước');
+        return;
+    }
+
+    const instructionInput = document.getElementById('improveInstructionInput');
+    const instruction = instructionInput ? instructionInput.value.trim() : '';
+    if (!instruction) {
+        showImproveError('Vui lòng nhập nội dung yêu cầu cải tiến vào ô bên dưới.');
+        if (instructionInput) instructionInput.focus();
+        return;
+    }
+
+    document.getElementById('improveErrorBanner').classList.add('hidden');
+    document.getElementById('improveResultSection').classList.add('hidden');
+    const loadingEl = document.getElementById('improveLoadingState');
+    loadingEl.classList.remove('hidden');
+
+    const btnSubmit = document.getElementById('btnSubmitImprove');
+    btnSubmit.disabled = true;
+    document.getElementById('btnSubmitImproveText').innerText = 'Đang xử lý...';
+
+    // Start timer
+    improveTimerSeconds = 0;
+    const timerText = document.getElementById('improveLoadingTimer');
+    if (timerText) {
+        timerText.innerText = `Đang kết nối tới mô hình AI (${currentImproveProvider})... (0s)`;
+    }
+    if (improveTimerInterval) clearInterval(improveTimerInterval);
+    improveTimerInterval = setInterval(() => {
+        improveTimerSeconds++;
+        if (timerText) {
+            timerText.innerText = `Đang tối ưu hóa câu lệnh & bóc tách dynamic form... (${improveTimerSeconds}s)`;
+        }
+    }, 1000);
+
+    try {
+        const res = await fetch(`/api/prompts/${currentPromptId}/improve`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                instruction: instruction,
+                provider: currentImproveProvider
+            })
+        });
+
+        if (!res.ok) {
+            const errData = await res.json().catch(() => ({}));
+            throw new Error(errData.detail || `Lỗi máy chủ (${res.status})`);
+        }
+
+        const data = await res.json();
+        currentImproveResult = data;
+
+        // Render Explanation (Giải thích những chỗ sửa)
+        const expEl = document.getElementById('improveExplanationText');
+        if (expEl) {
+            expEl.innerText = data.explanation || 'Đã tối ưu hóa và tích hợp đầy đủ các yêu cầu bổ sung vào prompt.';
+        }
+
+        // Render Changes List
+        const changesListEl = document.getElementById('improveChangesList');
+        if (changesListEl) {
+            const changes = data.changes || [];
+            if (changes.length > 0) {
+                changesListEl.innerHTML = `
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-2.5">
+                        ${changes.map(ch => `
+                            <div class="p-2.5 rounded-lg bg-dark-900 border border-dark-700/80 space-y-1">
+                                <div class="flex items-center justify-between">
+                                    <span class="text-[11px] font-semibold text-emerald-400 flex items-center gap-1">
+                                        <i class="fa-solid fa-arrow-trend-up text-[10px]"></i>
+                                        ${escapeHtml(ch.area || 'Điểm nâng cấp')}
+                                    </span>
+                                </div>
+                                ${ch.before ? `<p class="text-[11px] text-slate-500 line-through"><span class="text-slate-600">Trước:</span> ${escapeHtml(ch.before)}</p>` : ''}
+                                <p class="text-[11px] text-slate-200"><span class="text-emerald-400/90 font-medium">Sau:</span> ${escapeHtml(ch.after || '')}</p>
+                                ${ch.reason ? `<p class="text-[10px] text-slate-400 italic"><span class="text-slate-500">Lý do:</span> ${escapeHtml(ch.reason)}</p>` : ''}
+                            </div>
+                        `).join('')}
+                    </div>
+                `;
+            } else {
+                changesListEl.innerHTML = '';
+            }
+        }
+
+        // Render Improved Prompt Code Display
+        const codeDisplay = document.getElementById('improvePromptCodeDisplay');
+        if (codeDisplay) {
+            codeDisplay.innerText = data.prompt_code || '';
+        }
+        const charBadge = document.getElementById('improveCharCountBadge');
+        if (charBadge) {
+            charBadge.innerText = `${(data.prompt_code || '').length} chars`;
+        }
+
+        const typeBadge = document.getElementById('improveResultTypeBadge');
+        if (typeBadge) {
+            typeBadge.innerText = (data.prompt_type || 'JSON').toUpperCase();
+        }
+
+        // Render Dynamic Form Fields Table/Grid
+        const fields = data.fields || [];
+        const countBadge = document.getElementById('improveDynamicFieldsCount');
+        if (countBadge) {
+            countBadge.innerText = `${fields.length} trường`;
+        }
+
+        const fieldsContainer = document.getElementById('improveDynamicFieldsContainer');
+        if (fieldsContainer) {
+            if (fields.length > 0) {
+                fieldsContainer.innerHTML = fields.map((f, idx) => `
+                    <div class="flex flex-col sm:flex-row sm:items-center justify-between p-2.5 rounded-lg bg-dark-850 border border-dark-750 gap-2">
+                        <div class="flex items-center gap-2 min-w-0 sm:w-1/3">
+                            <span class="w-5 h-5 rounded bg-dark-900 text-slate-400 text-[10px] font-mono flex items-center justify-center flex-shrink-0 border border-dark-700">
+                                ${idx + 1}
+                            </span>
+                            <div class="min-w-0">
+                                <div class="text-xs font-semibold text-slate-200 truncate">${escapeHtml(f.label || f.key)}</div>
+                                <div class="text-[10px] font-mono text-slate-500 truncate">${escapeHtml(f.path)}</div>
+                            </div>
+                        </div>
+                        <div class="sm:w-2/3">
+                            <input type="text" value="${escapeHtml(f.value || '')}"
+                                   onchange="onImproveFieldEdit('${escapeHtml(f.path)}', this.value)"
+                                   class="w-full px-2.5 py-1.5 bg-dark-900 text-slate-100 text-xs font-mono rounded border border-dark-700 focus:outline-none focus:border-emerald-500 transition">
+                        </div>
+                    </div>
+                `).join('');
+            } else {
+                fieldsContainer.innerHTML = `
+                    <div class="p-4 text-center text-slate-500 text-xs">
+                        Không có trường tham số động riêng lẻ nào.
+                    </div>
+                `;
+            }
+        }
+
+        // Enable Save Buttons
+        const btnOverwrite = document.getElementById('btnImproveOverwrite');
+        const btnNewVersion = document.getElementById('btnImproveNewVersion');
+        if (btnOverwrite) btnOverwrite.disabled = false;
+        if (btnNewVersion) btnNewVersion.disabled = false;
+
+        // Reveal Result Section
+        document.getElementById('improveResultSection').classList.remove('hidden');
+        document.getElementById('improveResultSection').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+
+        showToast('AI đã hoàn tất việc cải tiến câu lệnh!');
+
+    } catch (err) {
+        console.error('Improve error:', err);
+        showImproveError(`Lỗi: ${err.message}`);
+    } finally {
+        if (improveTimerInterval) {
+            clearInterval(improveTimerInterval);
+            improveTimerInterval = null;
+        }
+        loadingEl.classList.add('hidden');
+        btnSubmit.disabled = false;
+        document.getElementById('btnSubmitImproveText').innerText = 'Gửi AI cải tiến lại';
+    }
+}
+
+function onImproveFieldEdit(path, newValue) {
+    if (!currentImproveResult || !currentImproveResult.fields) return;
+    const f = currentImproveResult.fields.find(item => item.path === path);
+    if (f) {
+        f.value = newValue;
+    }
+    // If parsed_json exists, update it as well
+    if (currentImproveResult.parsed_json) {
+        setValueByPath(currentImproveResult.parsed_json, path, newValue);
+        currentImproveResult.prompt_code = JSON.stringify(currentImproveResult.parsed_json, null, 2);
+        const codeDisplay = document.getElementById('improvePromptCodeDisplay');
+        if (codeDisplay) {
+            codeDisplay.innerText = currentImproveResult.prompt_code;
+        }
+        const charBadge = document.getElementById('improveCharCountBadge');
+        if (charBadge) {
+            charBadge.innerText = `${currentImproveResult.prompt_code.length} chars`;
+        }
+    }
+}
+
+function copyImprovedPromptCode() {
+    const codeDisplay = document.getElementById('improvePromptCodeDisplay');
+    const text = codeDisplay ? codeDisplay.innerText : '';
+    if (!text) return;
+
+    navigator.clipboard.writeText(text).then(() => {
+        showToast('Đã chép câu lệnh cải tiến vào bộ nhớ tạm!');
+    }).catch(() => {
+        const ta = document.createElement('textarea');
+        ta.value = text;
+        document.body.appendChild(ta);
+        ta.select();
+        document.execCommand('copy');
+        document.body.removeChild(ta);
+        showToast('Đã chép câu lệnh!');
+    });
+}
+
+async function saveImproveOverwrite() {
+    if (!currentPromptId || !currentImproveResult) return;
+
+    const btn = document.getElementById('btnImproveOverwrite');
+    btn.disabled = true;
+    btn.innerHTML = '<i class="fa-solid fa-circle-notch fa-spin"></i><span>Đang lưu đè...</span>';
+
+    try {
+        const res = await fetch(`/api/prompts/${currentPromptId}/save-improved`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                mode: 'overwrite',
+                title: currentImproveResult.title,
+                prompt_code: currentImproveResult.prompt_code,
+                raw_content: currentImproveResult.prompt_code,
+                prompt_type: currentImproveResult.prompt_type,
+                parsed_json: currentImproveResult.parsed_json,
+                fields: currentImproveResult.fields
+            })
+        });
+
+        if (!res.ok) {
+            const err = await res.json().catch(() => ({}));
+            throw new Error(err.detail || 'Lỗi khi lưu đè câu lệnh');
+        }
+
+        const data = await res.json();
+        currentPromptDetail = data.prompt;
+
+        // Update in currentPromptsList
+        const found = currentPromptsList.find(p => p.id === currentPromptId);
+        if (found) {
+            found.title = currentPromptDetail.title;
+            found.prompt_type = currentPromptDetail.prompt_type;
+            found.parsed_json = currentPromptDetail.parsed_json;
+        }
+
+        // Update card in sidebar
+        const cardTitle = document.querySelector(`#prompt-card-${currentPromptId} h4`);
+        if (cardTitle) {
+            cardTitle.innerText = currentPromptDetail.title;
+        }
+        const cardBadge = document.querySelector(`#prompt-card-${currentPromptId} span:last-child`);
+        if (cardBadge) {
+            const isJson = currentPromptDetail.prompt_type === 'json' || currentPromptDetail.parsed_json;
+            cardBadge.innerText = isJson ? 'JSON' : 'TEXT';
+            cardBadge.className = `text-[10px] px-1.5 py-0.5 rounded font-medium ${isJson ? 'bg-indigo-500/10 text-indigo-400 border border-indigo-500/20' : 'bg-slate-700/50 text-slate-300'}`;
+        }
+
+        // Re-render detail workspace
+        renderDetail(currentPromptDetail);
+
+        closeImproveModal();
+        showToast('Đã lưu đè thành công câu lệnh với nội dung cải tiến!');
+
+    } catch (err) {
+        console.error('Save overwrite error:', err);
+        showToast(`Lỗi: ${err.message}`);
+    } finally {
+        btn.disabled = false;
+        btn.innerHTML = '<i class="fa-solid fa-pen-to-square"></i><span>Lưu đè</span>';
+    }
+}
+
+async function saveImproveNewVersion() {
+    if (!currentPromptId || !currentImproveResult) return;
+
+    const btn = document.getElementById('btnImproveNewVersion');
+    btn.disabled = true;
+    btn.innerHTML = '<i class="fa-solid fa-circle-notch fa-spin"></i><span>Đang tạo phiên bản mới...</span>';
+
+    try {
+        const res = await fetch(`/api/prompts/${currentPromptId}/save-improved`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                mode: 'new_version',
+                title: currentImproveResult.title,
+                prompt_code: currentImproveResult.prompt_code,
+                raw_content: currentImproveResult.prompt_code,
+                prompt_type: currentImproveResult.prompt_type,
+                parsed_json: currentImproveResult.parsed_json,
+                fields: currentImproveResult.fields
+            })
+        });
+
+        if (!res.ok) {
+            const err = await res.json().catch(() => ({}));
+            throw new Error(err.detail || 'Lỗi khi lưu phiên bản mới');
+        }
+
+        const data = await res.json();
+        const newPrompt = data.prompt;
+
+        closeImproveModal();
+
+        // Refresh stats & load prompts, selecting the newly created prompt
+        await fetchStats();
+        await loadPrompts(newPrompt.id);
+
+        showToast(`Đã lưu thành công phiên bản mới: "${newPrompt.title}"!`);
+
+    } catch (err) {
+        console.error('Save new version error:', err);
+        showToast(`Lỗi: ${err.message}`);
+    } finally {
+        btn.disabled = false;
+        btn.innerHTML = '<i class="fa-solid fa-copy"></i><span>Lưu thành phiên bản mới</span>';
+    }
+}
+
+// ==========================================
+// Add Media / Additional Images Functionality
+// ==========================================
+let addMediaUploadedFiles = [];
+let currentAddMediaTab = 'upload';
+let modalExistingImages = [];
+let draggedImageIndex = null;
+
+function setAddMediaTab(tab) {
+    currentAddMediaTab = tab;
+    const tabUpload = document.getElementById('tabAddMediaUpload');
+    const tabUrl = document.getElementById('tabAddMediaUrl');
+    const paneUpload = document.getElementById('paneAddMediaUpload');
+    const paneUrl = document.getElementById('paneAddMediaUrl');
+
+    if (tab === 'url') {
+        if (tabUpload) {
+            tabUpload.className = 'px-3 py-1 rounded-md font-medium transition flex items-center gap-1.5 text-slate-400 hover:text-white';
+        }
+        if (tabUrl) {
+            tabUrl.className = 'px-3 py-1 rounded-md font-medium transition flex items-center gap-1.5 bg-dark-700 text-brand-400';
+        }
+        if (paneUpload) paneUpload.classList.add('hidden');
+        if (paneUrl) paneUrl.classList.remove('hidden');
+        const urlInput = document.getElementById('addMediaUrlInput');
+        if (urlInput) setTimeout(() => urlInput.focus(), 50);
+    } else {
+        if (tabUpload) {
+            tabUpload.className = 'px-3 py-1 rounded-md font-medium transition flex items-center gap-1.5 bg-dark-700 text-brand-400';
+        }
+        if (tabUrl) {
+            tabUrl.className = 'px-3 py-1 rounded-md font-medium transition flex items-center gap-1.5 text-slate-400 hover:text-white';
+        }
+        if (paneUpload) paneUpload.classList.remove('hidden');
+        if (paneUrl) paneUrl.classList.add('hidden');
+    }
+}
+
+function openAddMediaModal() {
+    if (!currentPromptId) {
+        showToast('Vui lòng chọn một câu lệnh trước khi tải thêm ảnh!');
+        return;
+    }
+
+    const badge = document.getElementById('addMediaPromptBadge');
+    if (badge) {
+        badge.innerText = `#${currentPromptId.toUpperCase()}`;
+    }
+
+    const errBanner = document.getElementById('addMediaErrorBanner');
+    if (errBanner) errBanner.classList.add('hidden');
+
+    const urlInput = document.getElementById('addMediaUrlInput');
+    if (urlInput) urlInput.value = '';
+
+    clearAllAddMediaFiles();
+    setAddMediaTab('upload');
+
+    // Render current existing images in prompt
+    renderModalExistingImages(currentPromptDetail?.images || []);
+
+    const modal = document.getElementById('addMediaModal');
+    if (modal) {
+        modal.classList.remove('hidden');
+    }
+}
+
+function closeAddMediaModal() {
+    const modal = document.getElementById('addMediaModal');
+    if (modal) {
+        modal.classList.add('hidden');
+    }
+    clearAllAddMediaFiles();
+}
+
+function handleAddMediaFiles(e) {
+    const files = e.target.files;
+    if (files && files.length > 0) {
+        processAddMediaFiles(files);
+    }
+}
+
+function processAddMediaFiles(files) {
+    const validImageTypes = ['image/jpeg', 'image/png', 'image/webp', 'image/gif', 'image/svg+xml'];
+    let errorMsg = null;
+
+    Array.from(files).forEach(file => {
+        if (!validImageTypes.includes(file.type) && !file.name.match(/\.(jpg|jpeg|png|webp|gif|svg)$/i)) {
+            errorMsg = `Tệp "${file.name}" không phải định dạng ảnh hợp lệ (PNG, JPG, WEBP, GIF).`;
+            return;
+        }
+        if (file.size > 15 * 1024 * 1024) {
+            errorMsg = `Ảnh "${file.name}" quá lớn (vượt quá 15MB).`;
+            return;
+        }
+
+        const reader = new FileReader();
+        reader.onload = (e) => {
+            addMediaUploadedFiles.push({
+                name: file.name,
+                size: file.size,
+                dataUrl: e.target.result
+            });
+            renderAddMediaThumbnails();
+        };
+        reader.readAsDataURL(file);
+    });
+
+    if (errorMsg) {
+        showToast(errorMsg);
+    }
+}
+
+function renderAddMediaThumbnails() {
+    const previewBox = document.getElementById('addMediaPreviewContainer');
+    const thumbnails = document.getElementById('addMediaThumbnails');
+    const countEl = document.getElementById('addMediaUploadedCount');
+    const tabLabel = document.getElementById('labelTabAddMediaUpload');
+
+    if (tabLabel) {
+        tabLabel.innerText = addMediaUploadedFiles.length > 0 ? `Tải ảnh lên (${addMediaUploadedFiles.length})` : 'Tải ảnh lên từ máy';
+    }
+
+    if (!previewBox || !thumbnails) return;
+
+    if (addMediaUploadedFiles.length === 0) {
+        previewBox.classList.add('hidden');
+        thumbnails.innerHTML = '';
+        return;
+    }
+
+    previewBox.classList.remove('hidden');
+    if (countEl) {
+        countEl.innerText = `${addMediaUploadedFiles.length} ảnh mới đã chọn`;
+    }
+
+    thumbnails.innerHTML = addMediaUploadedFiles.map((fileObj, idx) => `
+        <div class="relative group/thumb flex-shrink-0 w-16 h-16 rounded-xl overflow-hidden border border-dark-700 bg-dark-900 shadow">
+            <img src="${fileObj.dataUrl}" alt="${escapeHtml(fileObj.name)}" class="w-full h-full object-cover">
+            <button type="button" onclick="removeAddMediaFile(${idx})"
+                    title="Gỡ ảnh này"
+                    class="absolute top-1 right-1 w-5 h-5 rounded-full bg-black/80 hover:bg-rose-600 text-white text-[10px] flex items-center justify-center transition shadow">
+                <i class="fa-solid fa-xmark"></i>
+            </button>
+            <div class="absolute bottom-0 inset-x-0 bg-dark-900/80 px-1 py-0.5 text-[9px] text-slate-300 font-mono truncate text-center pointer-events-none">
+                ${formatFileSize(fileObj.size)}
+            </div>
+        </div>
+    `).join('');
+}
+
+function removeAddMediaFile(index) {
+    if (index >= 0 && index < addMediaUploadedFiles.length) {
+        addMediaUploadedFiles.splice(index, 1);
+        renderAddMediaThumbnails();
+    }
+}
+
+function clearAllAddMediaFiles() {
+    addMediaUploadedFiles = [];
+    const fileInput = document.getElementById('addMediaFileInput');
+    if (fileInput) fileInput.value = '';
+    renderAddMediaThumbnails();
+}
+
+async function submitAddMedia() {
+    if (!currentPromptId) {
+        showToast('Vui lòng chọn một câu lệnh trước khi thêm ảnh!');
+        return;
+    }
+
+    const banner = document.getElementById('addMediaErrorBanner');
+    const errorText = document.getElementById('addMediaErrorText');
+    if (banner) banner.classList.add('hidden');
+
+    const urlInput = document.getElementById('addMediaUrlInput');
+    const urlVal = urlInput ? urlInput.value.trim() : '';
+    const uploadedBase64List = addMediaUploadedFiles.map(f => f.dataUrl);
+
+    if (uploadedBase64List.length === 0 && !urlVal) {
+        if (banner && errorText) {
+            errorText.innerText = 'Vui lòng chọn ít nhất một tệp ảnh để tải lên hoặc dán ít nhất một đường dẫn (URL) ảnh!';
+            banner.classList.remove('hidden');
+        } else {
+            showToast('Vui lòng chọn ảnh từ máy hoặc dán link ảnh!');
+        }
+        return;
+    }
+
+    const btnSubmit = document.getElementById('btnSubmitAddMedia');
+    const btnText = document.getElementById('btnSubmitAddMediaText');
+    btnSubmit.disabled = true;
+    if (btnText) btnText.innerText = 'Đang lưu ảnh...';
+
+    try {
+        const res = await fetch(`/api/prompts/${currentPromptId}/add-images`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                media: urlVal,
+                images: uploadedBase64List
+            })
+        });
+
+        if (!res.ok) {
+            const err = await res.json().catch(() => ({}));
+            throw new Error(err.detail || 'Lỗi khi thêm ảnh vào câu lệnh');
+        }
+
+        const data = await res.json();
+        const refreshedPrompt = data.prompt;
+
+        if (refreshedPrompt) {
+            currentPromptDetail = refreshedPrompt;
+
+            // Update in currentPromptsList
+            const found = currentPromptsList.find(p => p.id === currentPromptId);
+            if (found) {
+                found.images = refreshedPrompt.images || [];
+                found.image_count = found.images.length;
+            }
+
+            // Re-render slider & detail outside
+            renderDetail(currentPromptDetail);
+
+            // Re-render modal existing images
+            renderModalExistingImages(currentPromptDetail.images || []);
+
+            // Clear upload inputs
+            clearAllAddMediaFiles();
+            if (urlInput) urlInput.value = '';
+
+            // Update sidebar card count badge
+            updateSidebarImageCount(currentPromptId, (currentPromptDetail.images || []).length);
+
+            // Navigate slider to the newly added image (last image)
+            if (currentPromptDetail.images && currentPromptDetail.images.length > 0) {
+                goToSlide(currentPromptDetail.images.length - 1);
+            }
+        }
+
+        showToast(data.message || 'Đã nạp thêm ảnh vào câu lệnh thành công!');
+
+    } catch (err) {
+        console.error('Error adding images:', err);
+        if (banner && errorText) {
+            errorText.innerText = err.message || 'Đã xảy ra lỗi khi thêm ảnh';
+            banner.classList.remove('hidden');
+        } else {
+            showToast(`Lỗi: ${err.message}`);
+        }
+    } finally {
+        btnSubmit.disabled = false;
+        if (btnText) btnText.innerText = 'Nạp ảnh mới vào câu lệnh';
+    }
+}
+
+// ==========================================
+// Existing Images Management (Drag Reorder & Delete)
+// ==========================================
+
+function renderModalExistingImages(images) {
+    modalExistingImages = images ? [...images] : [];
+    const listEl = document.getElementById('modalExistingImagesList');
+    const emptyEl = document.getElementById('modalNoExistingImages');
+    const badgeEl = document.getElementById('modalExistingImgCountBadge');
+
+    if (badgeEl) {
+        badgeEl.innerText = `${modalExistingImages.length} ảnh`;
+    }
+
+    if (!listEl) return;
+
+    if (modalExistingImages.length === 0) {
+        listEl.innerHTML = '';
+        if (emptyEl) emptyEl.classList.remove('hidden');
+        return;
+    }
+
+    if (emptyEl) emptyEl.classList.add('hidden');
+
+    listEl.innerHTML = modalExistingImages.map((img, idx) => {
+        const src = getImageSource(img);
+        const name = img.filename || (img.url ? img.url.split('/').pop().split('?')[0] : `Ảnh #${idx + 1}`);
+        const isCover = idx === 0;
+
+        return `
+            <div class="existing-img-card relative group rounded-xl bg-dark-900 border ${isCover ? 'border-brand-500/60 ring-1 ring-brand-500/20' : 'border-dark-700'} p-2 flex flex-col gap-1.5 transition-all duration-150 cursor-grab active:cursor-grabbing hover:border-brand-500/40 hover:bg-dark-850 shadow-md"
+                 draggable="true"
+                 data-index="${idx}"
+                 ondragstart="handleImageDragStart(event, ${idx})"
+                 ondragover="handleImageDragOver(event, ${idx})"
+                 ondragenter="handleImageDragEnter(event, ${idx})"
+                 ondragleave="handleImageDragLeave(event, ${idx})"
+                 ondrop="handleImageDrop(event, ${idx})"
+                 ondragend="handleImageDragEnd(event)">
+                 
+                <!-- Top Header: Order Badge & Drag Grip -->
+                <div class="flex items-center justify-between gap-1 text-[10px] pointer-events-none">
+                    <span class="font-mono px-1.5 py-0.5 rounded text-[10px] font-bold ${isCover ? 'bg-brand-500 text-white shadow-sm' : 'bg-dark-800 text-slate-300 border border-dark-700'}">
+                        ${isCover ? 'Ảnh bìa (#1)' : `#${idx + 1}`}
+                    </span>
+                    <span class="text-slate-500 group-hover:text-brand-400 transition">
+                        <i class="fa-solid fa-grip-vertical text-xs"></i>
+                    </span>
+                </div>
+
+                <!-- Thumbnail Preview -->
+                <div class="relative w-full aspect-square rounded-lg overflow-hidden bg-dark-950 border border-dark-800 pointer-events-none flex items-center justify-center">
+                    <img src="${src}" alt="${escapeHtml(name)}" class="w-full h-full object-cover select-none" onerror="handleThumbError(this)">
+                </div>
+
+                <!-- Card Footer: Name & Action -->
+                <div class="flex items-center justify-between gap-1 pt-0.5">
+                    <span class="text-[10px] text-slate-400 font-mono truncate flex-1 pointer-events-none" title="${escapeHtml(name)}">
+                        ${escapeHtml(name)}
+                    </span>
+                    <button type="button" 
+                            onclick="deletePromptExistingImage(event, ${img.id})"
+                            class="w-6 h-6 rounded-lg bg-dark-800 hover:bg-rose-600 text-slate-400 hover:text-white text-xs flex items-center justify-center transition shadow flex-shrink-0"
+                            title="Xóa ảnh này khỏi câu lệnh">
+                        <i class="fa-regular fa-trash-can text-[11px]"></i>
+                    </button>
+                </div>
+            </div>
+        `;
+    }).join('');
+}
+
+function handleImageDragStart(e, index) {
+    draggedImageIndex = index;
+    e.dataTransfer.effectAllowed = 'move';
+    e.dataTransfer.setData('text/plain', index);
+    setTimeout(() => {
+        if (e.target) {
+            e.target.classList.add('opacity-40', 'scale-95', 'border-dashed', 'border-brand-500');
+        }
+    }, 0);
+}
+
+function handleImageDragOver(e, index) {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'move';
+}
+
+function handleImageDragEnter(e, index) {
+    e.preventDefault();
+    if (index === draggedImageIndex) return;
+    const card = e.currentTarget;
+    if (card) {
+        card.classList.add('ring-2', 'ring-brand-500', 'scale-105', 'bg-dark-800');
+    }
+}
+
+function handleImageDragLeave(e, index) {
+    const card = e.currentTarget;
+    if (card) {
+        card.classList.remove('ring-2', 'ring-brand-500', 'scale-105', 'bg-dark-800');
+    }
+}
+
+async function handleImageDrop(e, targetIndex) {
+    e.preventDefault();
+    e.stopPropagation();
+
+    const card = e.currentTarget;
+    if (card) {
+        card.classList.remove('ring-2', 'ring-brand-500', 'scale-105', 'bg-dark-800');
+    }
+
+    if (draggedImageIndex === null || draggedImageIndex === targetIndex) {
+        return;
+    }
+
+    // Reorder array locally
+    const movedItem = modalExistingImages.splice(draggedImageIndex, 1)[0];
+    modalExistingImages.splice(targetIndex, 0, movedItem);
+
+    // Re-render modal existing images
+    renderModalExistingImages(modalExistingImages);
+
+    // Update main screen detail and slider
+    if (currentPromptDetail) {
+        currentPromptDetail.images = [...modalExistingImages];
+        renderDetail(currentPromptDetail);
+    }
+    const found = currentPromptsList.find(p => p.id === currentPromptId);
+    if (found) {
+        found.images = [...modalExistingImages];
+    }
+
+    // Call API to persist reordering
+    try {
+        const imageIds = modalExistingImages.map(img => img.id);
+        const res = await fetch(`/api/prompts/${currentPromptId}/reorder-images`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ image_ids: imageIds })
+        });
+        if (res.ok) {
+            const data = await res.json();
+            if (data.prompt) {
+                currentPromptDetail = data.prompt;
+                modalExistingImages = [...(currentPromptDetail.images || [])];
+            }
+            showToast('Đã đổi thứ tự ảnh thành công!');
+        } else {
+            throw new Error('Lỗi từ máy chủ khi lưu thứ tự');
+        }
+    } catch (err) {
+        console.error('Error reordering images:', err);
+        showToast('Không thể lưu thứ tự ảnh mới');
+    }
+}
+
+function handleImageDragEnd(e) {
+    draggedImageIndex = null;
+    document.querySelectorAll('.existing-img-card').forEach(card => {
+        card.classList.remove('opacity-40', 'scale-95', 'border-dashed', 'border-brand-500', 'ring-2', 'ring-brand-500', 'scale-105', 'bg-dark-800');
+    });
+}
+
+async function deletePromptExistingImage(e, imgId) {
+    if (e) {
+        e.preventDefault();
+        e.stopPropagation();
+    }
+    if (!currentPromptId || !imgId) return;
+
+    if (!confirm('Bạn có chắc chắn muốn xóa ảnh này khỏi câu lệnh?')) {
+        return;
+    }
+
+    try {
+        const res = await fetch(`/api/prompts/${currentPromptId}/images/${imgId}`, {
+            method: 'DELETE'
+        });
+
+        if (!res.ok) {
+            const err = await res.json().catch(() => ({}));
+            throw new Error(err.detail || 'Lỗi khi xóa ảnh');
+        }
+
+        const data = await res.json();
+        const refreshed = data.prompt;
+
+        if (refreshed) {
+            currentPromptDetail = refreshed;
+            modalExistingImages = [...(refreshed.images || [])];
+
+            // Re-render modal existing images
+            renderModalExistingImages(modalExistingImages);
+
+            // Re-render detail & slider outside
+            renderDetail(currentPromptDetail);
+
+            // Update in currentPromptsList
+            const found = currentPromptsList.find(p => p.id === currentPromptId);
+            if (found) {
+                found.images = refreshed.images || [];
+                found.image_count = found.images.length;
+            }
+
+            // Update sidebar card badge
+            updateSidebarImageCount(currentPromptId, (refreshed.images || []).length);
+        }
+
+        showToast('Đã xóa ảnh khỏi câu lệnh!');
+    } catch (err) {
+        console.error('Error deleting image:', err);
+        showToast(`Lỗi: ${err.message}`);
+    }
+}
+
+function updateSidebarImageCount(promptId, count) {
+    const activeCard = document.getElementById(`prompt-card-${promptId}`);
+    if (!activeCard) return;
+
+    const imgBadge = activeCard.querySelector('span.text-amber-400\\/90');
+    if (count > 0) {
+        if (imgBadge) {
+            imgBadge.innerHTML = `<i class="fa-solid fa-image text-[9px]"></i> ${count}`;
+        } else {
+            const badgeContainer = activeCard.querySelector('.flex.items-center.gap-1\\.5');
+            if (badgeContainer) {
+                const newBadge = document.createElement('span');
+                newBadge.className = 'text-[10px] px-1.5 py-0.5 rounded bg-dark-900/90 text-amber-400/90 border border-amber-500/20 flex items-center gap-1';
+                newBadge.innerHTML = `<i class="fa-solid fa-image text-[9px]"></i> ${count}`;
+                badgeContainer.insertBefore(newBadge, badgeContainer.firstChild);
+            }
+        }
+    } else if (imgBadge) {
+        imgBadge.remove();
+    }
+}
+
+

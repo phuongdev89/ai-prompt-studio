@@ -149,8 +149,28 @@
         <!-- Overlay for Mobile Sidebar -->
         <div id="sidebarOverlay" class="fixed inset-0 bg-black/60 backdrop-blur-sm z-20 hidden lg:hidden"></div>
 
-        <!-- Main Content Area: Section chi tiết Prompt -->
-        <main class="flex-1 overflow-y-auto min-h-0 bg-dark-900 p-4 lg:p-6 space-y-6" id="mainContent">
+        <!-- Right Content Wrapper with Loading Overlay -->
+        <div class="flex-1 flex flex-col min-w-0 min-h-0 relative h-full overflow-hidden">
+
+            <!-- Detail Loading Backdrop -->
+            <div id="detailLoadingBackdrop"
+                 class="absolute inset-0 bg-dark-900/75 backdrop-blur-[2.5px] z-30 flex items-center justify-center transition-all duration-200 hidden opacity-0 pointer-events-none">
+                <div class="p-6 rounded-2xl bg-dark-800/95 border border-dark-700 shadow-2xl flex flex-col items-center gap-3.5 text-center max-w-xs mx-4 transform scale-95 transition-transform duration-200" id="detailLoadingCard">
+                    <div class="w-12 h-12 rounded-2xl bg-brand-500/15 border border-brand-500/30 flex items-center justify-center text-brand-400 text-xl shadow-lg shadow-brand-500/10">
+                        <i class="fa-solid fa-circle-notch fa-spin"></i>
+                    </div>
+                    <div class="space-y-1">
+                        <h4 class="text-sm font-bold text-white">Đang tải câu lệnh...</h4>
+                        <p class="text-xs text-slate-400">Đang chuẩn bị tham số & hình ảnh</p>
+                    </div>
+                    <div class="w-32 h-1 bg-dark-900 rounded-full overflow-hidden">
+                        <div class="h-full bg-gradient-to-r from-brand-500 via-emerald-400 to-indigo-500 rounded-full animate-pulse w-full"></div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Main Content Area: Section chi tiết Prompt -->
+            <main class="flex-1 overflow-y-auto min-h-0 bg-dark-900 p-4 lg:p-6 space-y-6" id="mainContent">
 
             <!-- Detail Card Header -->
             <div class="bg-dark-800 border border-dark-700 rounded-2xl p-5 shadow-xl relative overflow-hidden">
@@ -168,7 +188,7 @@
                                 <i class="fa-regular fa-image text-slate-400"></i> <span id="imgCountText">0 Ảnh</span>
                             </span>
                         </div>
-                        <div class="flex items-center gap-2 group/title">
+                        <div class="flex items-center gap-2 group/title flex-wrap">
                             <h2 id="currentPromptTitle"
                                 contenteditable="true"
                                 spellcheck="false"
@@ -176,6 +196,13 @@
                                 title="Nhấp trực tiếp để sửa tiêu đề (Enter để lưu)">
                                 Tiêu đề câu lệnh
                             </h2>
+                            <!-- AI Title Generator Button -->
+                            <button type="button" onclick="generateTitleAI()" id="btnGenerateTitleAI"
+                                    title="Nhấp để AI tự động đặt lại tiêu đề ngắn gọn, bắt mắt theo nội dung prompt"
+                                    class="px-2 py-1 rounded-lg bg-gradient-to-r from-brand-500/20 via-indigo-500/20 to-purple-500/20 hover:from-brand-500 hover:via-indigo-500 hover:to-purple-500 text-brand-300 hover:text-white border border-brand-500/30 hover:border-transparent text-xs font-medium transition flex items-center gap-1.5 shadow-sm active:scale-95 group/btn">
+                                <i class="fa-solid fa-wand-magic-sparkles text-[11px] text-amber-300 group-hover/btn:rotate-12 transition-transform"></i>
+                                <span>AI Đặt tên</span>
+                            </button>
                             <span class="text-xs text-slate-500 opacity-0 group-hover/title:opacity-100 transition flex items-center gap-1 pointer-events-none select-none">
                                 <i class="fa-solid fa-pen text-[10px]"></i>
                                 <span>Nhấp để sửa</span>
@@ -185,9 +212,13 @@
 
                     <!-- Action Buttons -->
                     <div class="flex items-center gap-2.5 flex-wrap">
-                        <button onclick="openGenerateImageModal()" id="generateImageBtn" class="px-4 py-2.5 rounded-xl bg-gradient-to-r from-purple-600 via-pink-600 to-indigo-600 hover:from-purple-500 hover:via-pink-500 hover:to-indigo-500 text-white font-semibold text-sm shadow-lg shadow-purple-600/30 flex items-center gap-2 transition active:scale-95" title="Tạo ảnh với AI cấu hình trong .env">
+                        <button onclick="openImproveModal()" id="improvePromptBtn" class="px-4 py-2.5 rounded-xl bg-gradient-to-r from-emerald-600 via-teal-600 to-cyan-600 hover:from-emerald-500 hover:via-teal-500 hover:to-cyan-500 text-white font-semibold text-sm shadow-lg shadow-emerald-600/30 flex items-center gap-2 transition active:scale-95" title="Cải tiến câu lệnh bằng AI">
                             <i class="fa-solid fa-wand-magic-sparkles text-amber-300"></i>
-                            <span>Tạo ảnh với prompt này</span>
+                            <span>Cải tiến prompt</span>
+                        </button>
+                        <button onclick="openGenerateImageModal()" id="generateImageBtn" class="px-4 py-2.5 rounded-xl bg-gradient-to-r from-purple-600 via-pink-600 to-indigo-600 hover:from-purple-500 hover:via-pink-500 hover:to-indigo-500 text-white font-semibold text-sm shadow-lg shadow-purple-600/30 flex items-center gap-2 transition active:scale-95" title="Tạo ảnh với AI cấu hình trong .env">
+                            <i class="fa-solid fa-image text-purple-200"></i>
+                            <span>Tạo ảnh</span>
                         </button>
                         <button onclick="convertPromptToJsonAI()" id="convertJsonBtn" class="hidden px-3.5 py-2.5 rounded-xl bg-gradient-to-r from-indigo-600 to-violet-600 hover:from-indigo-500 hover:to-violet-500 text-white font-semibold text-sm shadow-lg shadow-indigo-600/30 flex items-center gap-1.5 transition active:scale-95">
                             <i class="fa-solid fa-code text-indigo-200"></i>
@@ -197,15 +228,12 @@
                             <i class="fa-solid fa-copy"></i>
                             <span>Sao chép Prompt</span>
                         </button>
-                        <button onclick="resetCurrentForm()" class="px-3.5 py-2.5 rounded-xl bg-dark-700 hover:bg-dark-600 text-slate-300 hover:text-white font-medium text-sm border border-dark-600 flex items-center gap-1.5 transition">
-                            <i class="fa-solid fa-rotate-left"></i>
-                            <span class="hidden sm:inline">Khôi phục gốc</span>
-                        </button>
                         <button onclick="deleteCurrentPrompt()" class="px-3.5 py-2.5 rounded-xl bg-rose-500/10 hover:bg-rose-600 text-rose-400 hover:text-white font-medium text-sm border border-rose-500/30 hover:border-rose-600 flex items-center gap-1.5 transition active:scale-95" title="Xóa bản ghi này">
                             <i class="fa-regular fa-trash-can"></i>
                             <span class="hidden sm:inline">Xóa</span>
                         </button>
                     </div>
+
                 </div>
             </div>
 
@@ -215,11 +243,19 @@
                 <!-- Left Column (5 Cols on XL): Image Slider & Media Preview -->
                 <div class="xl:col-span-5 space-y-6">
                     <div class="bg-dark-800 border border-dark-700 rounded-2xl p-4 shadow-lg space-y-3">
-                        <div class="flex items-center justify-between border-b border-dark-700/80 pb-3">
-                            <h3 class="font-semibold text-slate-200 text-sm flex items-center gap-2">
-                                <i class="fa-solid fa-images text-brand-500"></i>
-                                Ảnh tham chiếu & Kết quả mẫu
-                            </h3>
+                        <div class="flex items-center justify-between border-b border-dark-700/80 pb-3 flex-wrap gap-2">
+                            <div class="flex items-center gap-2.5 flex-wrap">
+                                <h3 class="font-semibold text-slate-200 text-sm flex items-center gap-2">
+                                    <i class="fa-solid fa-images text-brand-500"></i>
+                                    <span>Ảnh tham chiếu & Kết quả mẫu</span>
+                                </h3>
+                                <button type="button" onclick="openAddMediaModal()" id="btnAddMedia"
+                                        class="px-2.5 py-1 rounded-lg bg-brand-500/15 hover:bg-brand-600 text-brand-300 hover:text-white border border-brand-500/30 hover:border-transparent text-xs font-medium transition flex items-center gap-1.5 shadow-sm active:scale-95"
+                                        title="Tải thêm ảnh từ máy tính hoặc dán link ảnh vào câu lệnh này">
+                                    <i class="fa-solid fa-cloud-arrow-up text-[11px]"></i>
+                                    <span>Tải thêm ảnh</span>
+                                </button>
+                            </div>
                             <span id="sliderCounter" class="text-xs text-slate-400 font-mono px-2 py-0.5 rounded bg-dark-900 border border-dark-700">0 / 0</span>
                         </div>
 
@@ -332,7 +368,7 @@
 
         </main>
 
-    </div>
+        </div>
 
     <!-- Create New Prompt Modal -->
     <div id="createModal" class="fixed inset-0 z-50 bg-black/80 backdrop-blur-md hidden flex items-center justify-center p-4">
@@ -355,14 +391,66 @@
 
             <!-- Modal Form (2 fields as requested) -->
             <form id="createPromptForm" onsubmit="event.preventDefault(); submitCreatePrompt(event); return false;" class="p-6 space-y-4">
-                <!-- Field 1: Media URL -->
-                <div class="space-y-1.5">
-                    <label for="newMediaInput" class="text-xs font-semibold text-slate-200 flex items-center gap-1.5">
-                        <i class="fa-regular fa-image text-brand-500"></i>
-                        Ảnh hoặc video kết quả mẫu <span class="text-slate-500 font-normal">(Tùy chọn)</span>
-                    </label>
-                    <input type="text" id="newMediaInput" placeholder="Dán link ảnh/video (VD: https://... hoặc nhiều link phân cách bằng dấu phẩy)"
-                           class="w-full px-3.5 py-2.5 bg-dark-900 text-slate-100 text-xs rounded-xl border border-dark-700 focus:outline-none focus:border-brand-500 focus:ring-1 focus:ring-brand-500 placeholder-slate-500 transition">
+                <!-- Field 1: Media (Upload files or Paste links) -->
+                <div class="space-y-2">
+                    <div class="flex items-center justify-between">
+                        <label class="text-xs font-semibold text-slate-200 flex items-center gap-1.5">
+                            <i class="fa-regular fa-image text-brand-500"></i>
+                            <span>Ảnh kết quả mẫu</span>
+                            <span class="text-slate-500 font-normal">(Tùy chọn)</span>
+                        </label>
+                        <!-- Method tabs -->
+                        <div class="flex bg-dark-900 p-0.5 rounded-lg border border-dark-700 text-[11px]">
+                            <button type="button" onclick="setCreateMediaTab('upload')" id="btnCreateTabUpload" class="px-2.5 py-1 rounded-md bg-dark-700 text-brand-400 font-medium transition flex items-center gap-1.5">
+                                <i class="fa-solid fa-cloud-arrow-up text-[10px]"></i>
+                                <span id="labelTabUpload">Tải ảnh lên</span>
+                            </button>
+                            <button type="button" onclick="setCreateMediaTab('url')" id="btnCreateTabUrl" class="px-2.5 py-1 rounded-md text-slate-400 hover:text-white transition flex items-center gap-1.5">
+                                <i class="fa-solid fa-link text-[10px]"></i>
+                                <span>Dán liên kết (URL)</span>
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- Mode 1: File Upload (Dropzone + Multi-file Previews) -->
+                    <div id="createUploadSection" class="space-y-2">
+                        <!-- Hidden file input (supports multiple files) -->
+                        <input type="file" id="newImageFileInput" multiple accept="image/*" class="hidden" onchange="handleNewPromptFiles(event)">
+
+                        <!-- Dropzone Area -->
+                        <div id="createImageDropzone"
+                             onclick="document.getElementById('newImageFileInput').click()"
+                             class="border-2 border-dashed border-dark-700 hover:border-brand-500/70 bg-dark-900/60 hover:bg-dark-900 rounded-xl p-4 text-center cursor-pointer transition flex flex-col items-center justify-center gap-1.5 group">
+                            <div class="w-9 h-9 rounded-xl bg-dark-800 group-hover:bg-brand-500/10 text-slate-400 group-hover:text-brand-400 flex items-center justify-center transition border border-dark-700">
+                                <i class="fa-solid fa-cloud-arrow-up text-base"></i>
+                            </div>
+                            <div class="text-xs text-slate-300">
+                                <span class="font-semibold text-brand-400">Nhấp để chọn ảnh từ máy</span> hoặc kéo thả vào đây
+                            </div>
+                            <p class="text-[11px] text-slate-500">Hỗ trợ chọn nhiều ảnh: PNG, JPG, WEBP (Tối đa 15MB/ảnh)</p>
+                        </div>
+
+                        <!-- Uploaded files preview list -->
+                        <div id="createUploadedPreviewContainer" class="hidden space-y-1.5">
+                            <div class="flex items-center justify-between text-[11px] text-slate-400">
+                                <span id="createUploadedCount" class="font-medium text-slate-300">0 ảnh đã chọn</span>
+                                <button type="button" onclick="clearAllNewPromptFiles()" class="text-rose-400 hover:text-rose-300 transition flex items-center gap-1">
+                                    <i class="fa-regular fa-trash-can text-[10px]"></i>
+                                    <span>Gỡ hết ảnh</span>
+                                </button>
+                            </div>
+                            <div id="createUploadedThumbnails" class="flex gap-2 overflow-x-auto pb-1 pt-0.5 no-scrollbar">
+                                <!-- Injected dynamically by JS -->
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Mode 2: URL Link Input -->
+                    <div id="createUrlSection" class="hidden space-y-1">
+                        <input type="text" id="newMediaInput" placeholder="Dán link ảnh/video (VD: https://... hoặc nhiều link phân cách bằng dấu phẩy)"
+                               class="w-full px-3.5 py-2.5 bg-dark-900 text-slate-100 text-xs rounded-xl border border-dark-700 focus:outline-none focus:border-brand-500 focus:ring-1 focus:ring-brand-500 placeholder-slate-500 transition">
+                        <p class="text-[11px] text-slate-500">Hệ thống sẽ tự động tải ảnh về lưu trữ cục bộ trên máy chủ.</p>
+                    </div>
                 </div>
 
                 <!-- Field 2: Prompt Content -->
@@ -393,8 +481,393 @@
         </div>
     </div>
 
+    <!-- Improve Prompt Modal (Cải tiến prompt bằng AI) -->
+    <div id="improvePromptModal" class="fixed inset-0 z-50 bg-black/80 backdrop-blur-md hidden flex items-center justify-center p-3 sm:p-4 overflow-y-auto">
+        <div class="bg-dark-800 border border-dark-700 rounded-2xl w-full max-w-4xl my-auto overflow-hidden shadow-2xl animate-fade-in flex flex-col max-h-[94vh]">
+            
+            <!-- Modal Header -->
+            <div class="px-6 py-4 border-b border-dark-700 flex items-center justify-between bg-dark-850 flex-shrink-0">
+                <div class="flex items-center space-x-3">
+                    <div class="w-9 h-9 rounded-xl bg-gradient-to-tr from-emerald-600 via-teal-600 to-cyan-600 text-white flex items-center justify-center shadow-lg shadow-emerald-600/30">
+                        <i class="fa-solid fa-wand-magic-sparkles text-sm"></i>
+                    </div>
+                    <div>
+                        <h3 class="font-bold text-white text-base flex items-center gap-2">
+                            <span>Cải tiến câu lệnh Prompt bằng AI</span>
+                            <span id="improvePromptBadge" class="text-[11px] font-mono px-2 py-0.5 rounded bg-dark-700 text-emerald-400 border border-emerald-500/30">#PROMPT</span>
+                        </h3>
+                        <p class="text-xs text-slate-400">AI tối ưu prompt gốc theo yêu cầu, bóc tách tham số dynamic form và giải thích chi tiết</p>
+                    </div>
+                </div>
+                <button onclick="closeImproveModal()" class="w-8 h-8 rounded-lg text-slate-400 hover:text-white hover:bg-dark-700 flex items-center justify-center transition">
+                    <i class="fa-solid fa-xmark text-base"></i>
+                </button>
+            </div>
+
+            <!-- Modal Content (Scrollable) -->
+            <div class="p-5 sm:p-6 space-y-5 overflow-y-auto flex-1">
+
+                <!-- Error Banner -->
+                <div id="improveErrorBanner" class="hidden p-3.5 rounded-xl bg-rose-500/15 border border-rose-500/40 text-rose-300 text-xs flex items-start gap-2.5">
+                    <i class="fa-solid fa-triangle-exclamation text-rose-400 text-sm mt-0.5 flex-shrink-0"></i>
+                    <div class="flex-1 min-w-0" id="improveErrorText">Đã xảy ra lỗi khi cải tiến prompt.</div>
+                    <button onclick="document.getElementById('improveErrorBanner').classList.add('hidden')" class="text-rose-400 hover:text-rose-200">
+                        <i class="fa-solid fa-xmark"></i>
+                    </button>
+                </div>
+
+                <!-- AI Provider Selector -->
+                <div class="p-3 bg-dark-900/90 rounded-xl border border-dark-700 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                    <div class="flex items-center gap-2">
+                        <span class="text-xs font-semibold text-slate-200 flex items-center gap-1.5">
+                            <i class="fa-solid fa-server text-emerald-400"></i>
+                            <span>Nguồn AI (Provider):</span>
+                        </span>
+                        <span id="improveProviderInfoBadge" class="text-[11px] font-mono px-2 py-0.5 rounded bg-dark-800 text-emerald-300 border border-emerald-500/30">Custom OpenAI</span>
+                    </div>
+                    <div class="inline-flex p-1 bg-dark-800 rounded-xl border border-dark-700 gap-1 text-xs">
+                        <button type="button" onclick="setImproveProvider('openai')" id="btnImproveProviderOpenAI"
+                                class="px-3 py-1.5 rounded-lg font-medium transition flex items-center gap-1.5 bg-emerald-600 text-white shadow">
+                            <i class="fa-solid fa-network-wired text-xs"></i>
+                            <span>Custom OpenAI</span>
+                        </button>
+                        <button type="button" onclick="setImproveProvider('gemini')" id="btnImproveProviderGemini"
+                                class="px-3 py-1.5 rounded-lg font-medium transition flex items-center gap-1.5 text-slate-400 hover:text-white">
+                            <i class="fa-brands fa-google text-xs text-amber-400"></i>
+                            <span>Google Gemini</span>
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Original Prompt Preview (Collapsible) -->
+                <div class="space-y-1.5">
+                    <div class="flex items-center justify-between">
+                        <label class="text-xs font-semibold text-slate-300 flex items-center gap-1.5">
+                            <i class="fa-solid fa-file-lines text-slate-400"></i>
+                            <span>Câu lệnh gốc hiện tại:</span>
+                        </label>
+                        <button type="button" onclick="toggleImproveOriginalPrompt()" id="btnToggleOrigPrompt" class="text-[11px] text-emerald-400 hover:text-emerald-300 flex items-center gap-1">
+                            <span id="toggleOrigPromptText">Thu gọn</span>
+                            <i id="toggleOrigPromptIcon" class="fa-solid fa-chevron-up text-[10px]"></i>
+                        </button>
+                    </div>
+                    <div id="improveOriginalPromptWrapper" class="transition-all duration-200 overflow-hidden">
+                        <pre id="improveOriginalPromptText" class="p-3 bg-dark-900/90 text-slate-400 text-xs font-mono rounded-xl border border-dark-700 max-h-36 overflow-y-auto whitespace-pre-wrap break-words leading-relaxed"></pre>
+                    </div>
+                </div>
+
+                <!-- Improvement Instructions Textarea -->
+                <div class="space-y-1.5">
+                    <label for="improveInstructionInput" class="text-xs font-semibold text-slate-200 flex items-center justify-between">
+                        <span class="flex items-center gap-1.5">
+                            <i class="fa-solid fa-pen-nib text-cyan-400"></i>
+                            Yêu cầu cải tiến / bổ sung chi tiết <span class="text-rose-400">*</span>
+                        </span>
+                        <span class="text-[11px] text-slate-400">Nhập cụ thể những gì bạn muốn nâng cấp</span>
+                    </label>
+                    <textarea id="improveInstructionInput" rows="4" required
+                              class="w-full px-3.5 py-2.5 bg-dark-900 text-slate-100 text-xs rounded-xl border border-dark-700 focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 placeholder-slate-500 transition leading-relaxed"
+                              placeholder="Ví dụ: Nâng cấp ánh sáng thành cinematic golden hour với volumetric fog, bổ sung thông số máy ảnh Canon EOS R5 ống kính 85mm f/1.4, làm rõ nét biểu cảm cười rạng rỡ tự nhiên của nhân vật, đổi trang phục sang áo dài cách tân màu pastel thêu tay..."></textarea>
+                    
+                    <!-- Quick suggestions tags -->
+                    <div class="flex items-center gap-1.5 overflow-x-auto pt-1 pb-0.5 no-scrollbar text-[11px]">
+                        <span class="text-slate-500 flex-shrink-0">Gợi ý nhanh:</span>
+                        <button type="button" onclick="appendImproveSuggestion('Bổ sung thông số camera chuyên nghiệp (ống kính 85mm f/1.4, góc máy điện ảnh, độ phân giải 8K UHD). ')" class="px-2 py-0.5 rounded bg-dark-900 hover:bg-dark-700 text-slate-300 hover:text-emerald-300 border border-dark-700 whitespace-nowrap transition">+ Camera 85mm 8K</button>
+                        <button type="button" onclick="appendImproveSuggestion('Nâng cấp ánh sáng Cinematic soft lighting, golden hour, rim light tôn vóc dáng. ')" class="px-2 py-0.5 rounded bg-dark-900 hover:bg-dark-700 text-slate-300 hover:text-emerald-300 border border-dark-700 whitespace-nowrap transition">+ Ánh sáng Cinematic</button>
+                        <button type="button" onclick="appendImproveSuggestion('Chi tiết hóa chất liệu trang phục, làn da tự nhiên mịn màng không tì vết (hyper-realistic skin texture). ')" class="px-2 py-0.5 rounded bg-dark-900 hover:bg-dark-700 text-slate-300 hover:text-emerald-300 border border-dark-700 whitespace-nowrap transition">+ Da & Vải siêu thực</button>
+                        <button type="button" onclick="appendImproveSuggestion('Tối ưu bố cục theo tỉ lệ vàng, độ sâu trường ảnh nông (shallow depth of field, creamy bokeh). ')" class="px-2 py-0.5 rounded bg-dark-900 hover:bg-dark-700 text-slate-300 hover:text-emerald-300 border border-dark-700 whitespace-nowrap transition">+ Bokeh & Bố cục</button>
+                    </div>
+                </div>
+
+                <!-- Submit Button -->
+                <div class="flex items-center justify-between pt-1 flex-wrap gap-2">
+                    <span class="text-xs text-emerald-400/90 flex items-center gap-1.5">
+                        <i class="fa-solid fa-shield-halved text-[11px]"></i>
+                        <span>Bảo toàn 100% thuộc tính & bộ khung cố định của prompt gốc, chỉ nâng cấp nội dung</span>
+                    </span>
+                    <button type="button" onclick="submitImprovePrompt()" id="btnSubmitImprove"
+                            class="px-5 py-2.5 rounded-xl bg-gradient-to-r from-emerald-600 via-teal-600 to-cyan-600 hover:from-emerald-500 hover:via-teal-500 hover:to-cyan-500 text-white text-xs font-bold shadow-lg shadow-emerald-600/30 flex items-center gap-2 transition active:scale-95">
+                        <i class="fa-solid fa-wand-magic-sparkles text-amber-300"></i>
+                        <span id="btnSubmitImproveText">Gửi AI cải tiến</span>
+                    </button>
+                </div>
+
+                <!-- Loading State Indicator (Hidden by default) -->
+                <div id="improveLoadingState" class="hidden p-6 rounded-xl bg-dark-900/90 border border-emerald-500/30 text-center space-y-3">
+                    <div class="w-12 h-12 mx-auto rounded-2xl bg-emerald-500/10 flex items-center justify-center text-emerald-400 text-2xl animate-pulse">
+                        <i class="fa-solid fa-circle-notch fa-spin"></i>
+                    </div>
+                    <div class="space-y-1">
+                        <div class="text-sm font-semibold text-white">Đang gửi dữ liệu và đợi AI nâng cấp prompt...</div>
+                        <p class="text-xs text-slate-400" id="improveLoadingTimer">Đang kết nối tới mô hình AI...</p>
+                    </div>
+                    <div class="w-48 h-1.5 bg-dark-800 rounded-full mx-auto overflow-hidden">
+                        <div class="h-full bg-gradient-to-r from-emerald-500 via-teal-500 to-cyan-500 rounded-full animate-pulse w-full"></div>
+                    </div>
+                </div>
+
+                <!-- Result Section (Shown when AI finishes) -->
+                <div id="improveResultSection" class="hidden space-y-5 pt-3 border-t border-dark-700/80">
+                    
+                    <!-- Section Header -->
+                    <div class="flex items-center justify-between bg-emerald-950/30 border border-emerald-500/30 p-3 rounded-xl">
+                        <div class="flex items-center gap-2">
+                            <span class="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-pulse"></span>
+                            <span class="text-xs font-bold text-emerald-300 uppercase tracking-wider">Kết quả câu lệnh sau cải tiến</span>
+                        </div>
+                        <span id="improveResultTypeBadge" class="text-[10px] font-mono px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">JSON STRUCTURED</span>
+                    </div>
+
+                    <!-- 1. Explanation of changes (Giải thích những chỗ sửa) -->
+                    <div class="bg-dark-900/90 border border-dark-700 rounded-xl p-4 space-y-3">
+                        <div class="flex items-center gap-2">
+                            <i class="fa-solid fa-lightbulb text-amber-400 text-sm"></i>
+                            <h4 class="text-xs font-bold text-white uppercase tracking-wider">1. Giải thích những chỗ sửa & nâng cấp</h4>
+                        </div>
+                        <div id="improveExplanationText" class="text-xs text-slate-300 leading-relaxed bg-dark-850 p-3 rounded-lg border border-dark-750">
+                            <!-- Injected by JS -->
+                        </div>
+                        <!-- Specific changes list/badges -->
+                        <div id="improveChangesList" class="space-y-2 pt-1">
+                            <!-- Injected by JS -->
+                        </div>
+                    </div>
+
+                    <!-- 2. Improved Prompt Code Content -->
+                    <div class="bg-dark-900/90 border border-dark-700 rounded-xl p-4 space-y-2.5">
+                        <div class="flex items-center justify-between">
+                            <div class="flex items-center gap-2">
+                                <i class="fa-solid fa-code text-cyan-400 text-sm"></i>
+                                <h4 class="text-xs font-bold text-white uppercase tracking-wider">2. Nội dung Prompt mới</h4>
+                            </div>
+                            <div class="flex items-center gap-2">
+                                <span id="improveCharCountBadge" class="text-[11px] text-slate-500 font-mono">0 chars</span>
+                                <button type="button" onclick="copyImprovedPromptCode()" class="px-2.5 py-1 rounded-lg bg-dark-800 hover:bg-dark-700 text-slate-300 hover:text-white text-xs font-medium border border-dark-700 transition flex items-center gap-1.5 active:scale-95">
+                                    <i class="fa-solid fa-copy text-xs"></i>
+                                    <span>Chép lệnh mới</span>
+                                </button>
+                            </div>
+                        </div>
+                        <div class="relative rounded-xl overflow-hidden border border-dark-700/80">
+                            <pre id="improvePromptCodeDisplay" class="p-3.5 text-xs font-mono text-emerald-400 bg-dark-950 overflow-x-auto whitespace-pre-wrap break-words max-h-60 leading-relaxed selection:bg-brand-600 selection:text-white"></pre>
+                        </div>
+                    </div>
+
+                    <!-- 3. Parsed Dynamic Form Parameters -->
+                    <div class="bg-dark-900/90 border border-dark-700 rounded-xl p-4 space-y-3">
+                        <div class="flex items-center justify-between">
+                            <div class="flex items-center gap-2">
+                                <i class="fa-solid fa-sliders text-indigo-400 text-sm"></i>
+                                <h4 class="text-xs font-bold text-white uppercase tracking-wider">3. Tham số Dynamic Form đã bóc tách</h4>
+                            </div>
+                            <span id="improveDynamicFieldsCount" class="text-[11px] font-mono px-2 py-0.5 rounded bg-dark-800 text-indigo-300 border border-indigo-500/30">0 trường</span>
+                        </div>
+                        <p class="text-[11px] text-slate-400">Các tham số này được AI tự động phân tích và bóc tách thành form tùy biến:</p>
+                        
+                        <!-- Dynamic Fields Grid / List -->
+                        <div id="improveDynamicFieldsContainer" class="space-y-2 max-h-64 overflow-y-auto pr-1">
+                            <!-- Injected by JS -->
+                        </div>
+                    </div>
+
+                </div>
+
+            </div>
+
+            <!-- Modal Footer (with 3 requested buttons: Lưu đè, Lưu thành phiên bản mới, Đóng) -->
+            <div class="px-6 py-4 border-t border-dark-700 bg-dark-850 flex items-center justify-between gap-3 flex-shrink-0 flex-wrap">
+                <!-- Close button -->
+                <button type="button" onclick="closeImproveModal()"
+                        class="px-4 py-2.5 rounded-xl bg-dark-700 hover:bg-dark-600 text-slate-300 hover:text-white text-xs font-medium transition">
+                    <i class="fa-solid fa-xmark mr-1.5"></i>
+                    <span>Đóng</span>
+                </button>
+
+                <!-- Action Buttons: Lưu đè & Lưu thành phiên bản mới -->
+                <div class="flex items-center gap-2.5 flex-wrap">
+                    <button type="button" onclick="saveImproveOverwrite()" id="btnImproveOverwrite" disabled
+                            class="px-4 py-2.5 rounded-xl bg-amber-600 hover:bg-amber-500 disabled:opacity-40 disabled:pointer-events-none text-white text-xs font-bold shadow-lg shadow-amber-600/25 flex items-center gap-1.5 transition active:scale-95"
+                            title="Cập nhật trực tiếp nội dung vào bản ghi hiện tại">
+                        <i class="fa-solid fa-pen-to-square"></i>
+                        <span>Lưu đè</span>
+                    </button>
+                    <button type="button" onclick="saveImproveNewVersion()" id="btnImproveNewVersion" disabled
+                            class="px-5 py-2.5 rounded-xl bg-gradient-to-r from-brand-600 to-emerald-600 hover:from-brand-500 hover:to-emerald-500 disabled:opacity-40 disabled:pointer-events-none text-white text-xs font-bold shadow-lg shadow-brand-600/30 flex items-center gap-1.5 transition active:scale-95"
+                            title="Tạo một bản ghi prompt mới trong danh sách và giữ nguyên bản ghi gốc">
+                        <i class="fa-solid fa-copy"></i>
+                        <span>Lưu thành phiên bản mới</span>
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Add Media / Additional Images Modal (Tải thêm ảnh vào câu lệnh) -->
+    <div id="addMediaModal" class="fixed inset-0 z-50 bg-black/80 backdrop-blur-md hidden flex items-center justify-center p-3 sm:p-4 overflow-y-auto">
+        <div class="bg-dark-800 border border-dark-700 rounded-2xl w-full max-w-2xl my-auto overflow-hidden shadow-2xl animate-fade-in flex flex-col max-h-[92vh]">
+            
+            <!-- Modal Header -->
+            <div class="px-6 py-4 border-b border-dark-700 flex items-center justify-between bg-dark-850 flex-shrink-0">
+                <div class="flex items-center space-x-3">
+                    <div class="w-9 h-9 rounded-xl bg-gradient-to-tr from-brand-600 to-emerald-600 text-white flex items-center justify-center shadow-lg shadow-brand-600/30">
+                        <i class="fa-solid fa-cloud-arrow-up text-sm"></i>
+                    </div>
+                    <div>
+                        <h3 class="font-bold text-white text-base flex items-center gap-2">
+                            <span>Quản lý & Tải thêm ảnh vào câu lệnh</span>
+                            <span id="addMediaPromptBadge" class="text-[11px] font-mono px-2 py-0.5 rounded bg-dark-700 text-brand-400 border border-brand-500/30">#PROMPT</span>
+                        </h3>
+                        <p class="text-xs text-slate-400">Tải thêm ảnh mới, xóa bớt hoặc kéo thả để sắp xếp thứ tự hiển thị</p>
+                    </div>
+                </div>
+                <button onclick="closeAddMediaModal()" class="w-8 h-8 rounded-lg text-slate-400 hover:text-white hover:bg-dark-700 flex items-center justify-center transition">
+                    <i class="fa-solid fa-xmark text-base"></i>
+                </button>
+            </div>
+
+            <!-- Modal Content -->
+            <div class="p-5 sm:p-6 space-y-5 overflow-y-auto flex-1">
+                
+                <!-- Error Banner -->
+                <div id="addMediaErrorBanner" class="hidden p-3.5 rounded-xl bg-rose-500/15 border border-rose-500/40 text-rose-300 text-xs flex items-start gap-2.5">
+                    <i class="fa-solid fa-triangle-exclamation text-rose-400 text-sm mt-0.5 flex-shrink-0"></i>
+                    <div class="flex-1 min-w-0" id="addMediaErrorText">Đã xảy ra lỗi khi thêm ảnh.</div>
+                    <button onclick="document.getElementById('addMediaErrorBanner').classList.add('hidden')" class="text-rose-400 hover:text-rose-200">
+                        <i class="fa-solid fa-xmark"></i>
+                    </button>
+                </div>
+
+                <!-- SECTION 1: ADD NEW IMAGES -->
+                <div class="space-y-3">
+                    <div class="flex items-center justify-between">
+                        <span class="text-xs font-bold text-slate-200 uppercase tracking-wider flex items-center gap-1.5">
+                            <i class="fa-solid fa-cloud-arrow-up text-brand-400"></i>
+                            <span>1. Thêm ảnh mới vào bản ghi</span>
+                        </span>
+                        <!-- Mode Selection Tabs -->
+                        <div class="flex bg-dark-900 p-0.5 rounded-lg border border-dark-700 text-[11px]">
+                            <button type="button" onclick="setAddMediaTab('upload')" id="tabAddMediaUpload"
+                                    class="px-3 py-1 rounded-md font-medium transition flex items-center gap-1.5 bg-dark-700 text-brand-400">
+                                <i class="fa-solid fa-folder-open text-[10px]"></i>
+                                <span id="labelTabAddMediaUpload">Tải ảnh lên từ máy</span>
+                            </button>
+                            <button type="button" onclick="setAddMediaTab('url')" id="tabAddMediaUrl"
+                                    class="px-3 py-1 rounded-md font-medium transition flex items-center gap-1.5 text-slate-400 hover:text-white">
+                                <i class="fa-solid fa-link text-[10px]"></i>
+                                <span>Dán liên kết (URL)</span>
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- Hidden file input placed OUTSIDE the dropzone div -->
+                    <input type="file" id="addMediaFileInput" multiple accept="image/*" class="hidden" onchange="handleAddMediaFiles(event)">
+
+                    <!-- Pane 1: Upload from Computer -->
+                    <div id="paneAddMediaUpload" class="space-y-3">
+                        <div id="addMediaDropzone"
+                             onclick="document.getElementById('addMediaFileInput').click()"
+                             class="border-2 border-dashed border-dark-600 hover:border-brand-500 bg-dark-900/60 hover:bg-brand-500/5 rounded-2xl p-5 text-center cursor-pointer transition flex flex-col items-center justify-center group">
+                            <div class="w-11 h-11 rounded-xl bg-dark-800 group-hover:bg-brand-500/20 text-slate-400 group-hover:text-brand-400 flex items-center justify-center mb-2 transition shadow">
+                                <i class="fa-solid fa-cloud-arrow-up text-lg"></i>
+                            </div>
+                            <p class="text-xs font-semibold text-slate-200 mb-1 group-hover:text-brand-300 transition">
+                                Kéo thả ảnh vào đây hoặc <span class="text-brand-400 underline">nhấp để chọn tệp</span>
+                            </p>
+                            <p class="text-[11px] text-slate-400">Hỗ trợ PNG, JPG, JPEG, WEBP, GIF (tối đa 15MB/ảnh, có thể chọn nhiều ảnh cùng lúc)</p>
+                        </div>
+
+                        <!-- Selected Files Thumbnails Preview -->
+                        <div id="addMediaPreviewContainer" class="hidden space-y-2 bg-dark-900/80 p-3 rounded-xl border border-dark-700">
+                            <div class="flex items-center justify-between">
+                                <span id="addMediaUploadedCount" class="text-xs font-medium text-slate-300">0 ảnh mới đã chọn</span>
+                                <button type="button" onclick="clearAllAddMediaFiles()" class="text-xs text-rose-400 hover:text-rose-300 transition flex items-center gap-1">
+                                    <i class="fa-regular fa-trash-can text-[11px]"></i>
+                                    <span>Hủy các ảnh mới này</span>
+                                </button>
+                            </div>
+                            <div id="addMediaThumbnails" class="flex gap-2 overflow-x-auto pb-1 pt-1 no-scrollbar max-h-24">
+                                <!-- Injected dynamically by JS -->
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Pane 2: Paste URLs -->
+                    <div id="paneAddMediaUrl" class="hidden space-y-2">
+                        <label for="addMediaUrlInput" class="text-xs font-semibold text-slate-200 flex items-center justify-between">
+                            <span class="flex items-center gap-1.5">
+                                <i class="fa-solid fa-link text-brand-400"></i>
+                                Đường dẫn ảnh (URL)
+                            </span>
+                            <span class="text-[11px] text-slate-400">Hỗ trợ nhiều URL</span>
+                        </label>
+                        <textarea id="addMediaUrlInput" rows="3"
+                                  class="w-full px-3.5 py-2.5 bg-dark-900 text-slate-100 text-xs rounded-xl border border-dark-700 focus:outline-none focus:border-brand-500 focus:ring-1 focus:ring-brand-500 placeholder-slate-500 transition leading-relaxed font-mono"
+                                  placeholder="Dán một hoặc nhiều link ảnh vào đây (mỗi dòng 1 link hoặc phân cách bằng dấu phẩy)...&#10;https://example.com/image1.png&#10;https://example.com/image2.jpg"></textarea>
+                        <p class="text-[11px] text-slate-400 flex items-center gap-1.5">
+                            <i class="fa-solid fa-circle-info text-brand-400 text-xs"></i>
+                            <span>Hệ thống sẽ tự động tải các ảnh này về lưu trữ offline trong thư mục dữ liệu cục bộ.</span>
+                        </p>
+                    </div>
+
+                    <!-- Button to submit adding new files -->
+                    <div class="flex justify-end pt-1">
+                        <button type="button" onclick="submitAddMedia()" id="btnSubmitAddMedia"
+                                class="px-4 py-2 rounded-xl bg-gradient-to-r from-brand-600 to-emerald-600 hover:from-brand-500 hover:to-emerald-500 text-white text-xs font-bold shadow-lg shadow-brand-600/30 flex items-center gap-2 transition active:scale-95">
+                            <i class="fa-solid fa-cloud-arrow-up"></i>
+                            <span id="btnSubmitAddMediaText">Nạp ảnh mới vào câu lệnh</span>
+                        </button>
+                    </div>
+                </div>
+
+                <!-- SECTION 2: EXISTING IMAGES MANAGEMENT (DRAG TO REORDER & DELETE) -->
+                <div class="pt-4 border-t border-dark-700/80 space-y-3">
+                    <div class="flex items-center justify-between flex-wrap gap-2">
+                        <div class="flex items-center gap-2">
+                            <i class="fa-solid fa-images text-indigo-400 text-sm"></i>
+                            <h4 class="text-xs font-bold text-white uppercase tracking-wider">2. Ảnh hiện có của câu lệnh</h4>
+                            <span id="modalExistingImgCountBadge" class="text-[11px] font-mono px-2 py-0.5 rounded bg-dark-900 text-indigo-300 border border-indigo-500/30">0 ảnh</span>
+                        </div>
+                        <span class="text-[11px] text-slate-400 flex items-center gap-1.5 bg-dark-900 px-2.5 py-1 rounded-lg border border-dark-700">
+                            <i class="fa-solid fa-arrows-up-down-left-right text-[10px] text-brand-400"></i>
+                            <span>Kéo thả card để đổi thứ tự</span>
+                        </span>
+                    </div>
+                    <p class="text-[11px] text-slate-400">Ảnh đầu tiên (#1) sẽ là ảnh bìa hiển thị chính. Bạn có thể kéo thẻ ảnh để đổi vị trí hoặc nhấn biểu tượng thùng rác để xóa bớt ảnh không cần thiết.</p>
+
+                    <!-- Draggable Cards Container -->
+                    <div id="modalExistingImagesList" class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3 max-h-64 overflow-y-auto pr-1 select-none">
+                        <!-- Injected dynamically by JS -->
+                    </div>
+
+                    <!-- Placeholder when prompt has no images -->
+                    <div id="modalNoExistingImages" class="hidden p-6 text-center text-slate-500 bg-dark-900/50 rounded-xl border border-dashed border-dark-700">
+                        <i class="fa-regular fa-image text-2xl mb-2 text-slate-600 block"></i>
+                        <p class="text-xs font-medium text-slate-400">Chưa có ảnh nào trong câu lệnh này</p>
+                        <p class="text-[11px] text-slate-500 mt-0.5">Sử dụng khu vực phía trên để tải lên hoặc dán link ảnh đầu tiên</p>
+                    </div>
+                </div>
+
+            </div>
+
+            <!-- Modal Footer -->
+            <div class="px-6 py-4 border-t border-dark-700 bg-dark-850 flex items-center justify-between gap-3 flex-shrink-0">
+                <span class="text-xs text-slate-400 flex items-center gap-1.5">
+                    <i class="fa-solid fa-circle-check text-emerald-400 text-xs"></i>
+                    <span>Mọi thay đổi thứ tự và xóa ảnh được lưu tự động</span>
+                </span>
+                <button type="button" onclick="closeAddMediaModal()"
+                        class="px-5 py-2.5 rounded-xl bg-dark-700 hover:bg-dark-600 text-slate-200 hover:text-white text-xs font-semibold transition flex items-center gap-2 active:scale-95 shadow">
+                    <i class="fa-solid fa-xmark"></i>
+                    <span>Đóng</span>
+                </button>
+            </div>
+
+        </div>
+    </div>
+
     <!-- Generate Image Modal (Tạo ảnh với AI) -->
     <div id="generateImageModal" class="fixed inset-0 z-50 bg-black/80 backdrop-blur-md hidden flex items-center justify-center p-3 sm:p-4 overflow-y-auto">
+
         <div class="bg-dark-800 border border-dark-700 rounded-2xl w-full max-w-3xl my-auto overflow-hidden shadow-2xl animate-fade-in flex flex-col max-h-[92vh]">
             <!-- Modal Header -->
             <div class="px-6 py-4 border-b border-dark-700 flex items-center justify-between bg-dark-850 flex-shrink-0">
@@ -702,6 +1175,7 @@
     </div>
 
     <!-- App JavaScript Logic -->
-    <script src="/static/js/app.js?v=1.1.0"></script>
+    <script src="/static/js/app.js?v=1.2.2"></script>
 </body>
+
 </html>

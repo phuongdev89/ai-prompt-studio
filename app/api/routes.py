@@ -10,10 +10,24 @@ router = APIRouter(prefix="/api", tags=["prompts"])
 class CreatePromptRequest(BaseModel):
     prompt: str = Field(..., description="Nội dung câu lệnh (JSON hoặc Text)")
     media: Optional[str] = Field(None, description="URL hoặc đường dẫn ảnh/video kết quả mẫu")
+    images: Optional[List[str]] = Field(None, description="Danh sách URL hoặc Base64 ảnh tải lên từ máy tính")
 
 class UpdatePromptRequest(BaseModel):
     title: Optional[str] = None
     prompt_code: Optional[str] = None
+    fields: Optional[List[Dict[str, Any]]] = None
+
+class ImprovePromptRequest(BaseModel):
+    instruction: str = Field(..., description="Yêu cầu cải tiến của người dùng")
+    provider: Optional[str] = Field(None, description="Nhà cung cấp AI: 'openai' hoặc 'gemini'")
+
+class SaveImprovedPromptRequest(BaseModel):
+    mode: str = Field("overwrite", description="Chế độ lưu: 'overwrite' hoặc 'new_version'")
+    title: Optional[str] = None
+    prompt_code: str = Field(..., description="Nội dung câu lệnh prompt mới")
+    raw_content: Optional[str] = None
+    prompt_type: Optional[str] = "json"
+    parsed_json: Optional[Dict[str, Any]] = None
     fields: Optional[List[Dict[str, Any]]] = None
 
 class GenerateImageRequest(BaseModel):
@@ -27,6 +41,16 @@ class GenerateImageRequest(BaseModel):
 
 class SaveGeneratedImageRequest(BaseModel):
     image_data: str = Field(..., description="URL hoặc Base64 ảnh đã tạo")
+
+class AddImagesRequest(BaseModel):
+    images: Optional[List[str]] = Field(default_factory=list, description="Danh sách Base64 ảnh hoặc URLs")
+    media: Optional[str] = Field(None, description="Chuỗi URLs phân cách bằng dấu phẩy hoặc xuống dòng")
+
+class ReorderImagesRequest(BaseModel):
+    image_ids: List[int] = Field(..., description="Danh sách ID ảnh theo thứ tự mới")
+
+class DeleteImageRequest(BaseModel):
+    image_id: Optional[int] = Field(None, description="ID ảnh cần xóa")
 
 @router.get("/prompts")
 @router.get("/prompts/")
@@ -47,26 +71,44 @@ def list_prompts(
 @router.post("/prompts")
 @router.post("/prompts/")
 def create_prompt(payload: CreatePromptRequest):
+    import re
     if not payload.prompt or not payload.prompt.strip():
         raise HTTPException(status_code=400, detail="Nội dung prompt không được để trống")
 
+    # Combine images from payload.media and payload.images
+    media_list = []
+    if payload.media and payload.media.strip():
+        lines = re.split(r'[\r\n,]+', payload.media.strip())
+        for l in lines:
+            cleaned = l.strip()
+            if cleaned:
+                media_list.append(cleaned)
+
+    if payload.images:
+        for img in payload.images:
+            if isinstance(img, str) and img.strip():
+                media_list.append(img.strip())
+
     parsed_data = parse_incoming_prompt(
         raw_content=payload.prompt,
-        raw_media=payload.media
+        raw_media=None
     )
+    parsed_data["images"] = media_list
 
     created_item = PromptRepository.create_prompt(parsed_data)
 
-    # Immediately download any attached images or videos to local storage
+    # Immediately download any attached pending HTTP images or videos to local storage
     if created_item and created_item.get("images"):
-        try:
-            download_prompt_images_now(created_item["id"])
-            # Refresh prompt detail after download
-            refreshed = PromptRepository.get_prompt_by_id(created_item["id"])
-            if refreshed:
-                created_item = refreshed
-        except Exception as e:
-            print(f"[!] Warning: Immediate media download failed: {e}")
+        has_pending = any(img.get("status") == "pending" for img in created_item["images"] if isinstance(img, dict))
+        if has_pending:
+            try:
+                download_prompt_images_now(created_item["id"])
+                # Refresh prompt detail after download
+                refreshed = PromptRepository.get_prompt_by_id(created_item["id"])
+                if refreshed:
+                    created_item = refreshed
+            except Exception as e:
+                print(f"[!] Warning: Immediate media download failed: {e}")
 
     return created_item
 
@@ -130,7 +172,194 @@ def convert_prompt_to_json(prompt_id: str):
     refreshed = PromptRepository.get_prompt_by_id(prompt_id)
     return refreshed
 
+@router.post("/prompts/{prompt_id}/improve")
+def improve_prompt_endpoint(prompt_id: str, payload: ImprovePromptRequest):
+    from app.services.ai_improver import call_ai_improve_prompt
+    prompt = PromptRepository.get_prompt_by_id(prompt_id)
+    if not prompt:
+        raise HTTPException(status_code=404, detail="Prompt không tồn tại")
+
+    if not payload.instruction or not payload.instruction.strip():
+        raise HTTPException(status_code=400, detail="Vui lòng nhập yêu cầu cải tiến")
+
+    prompt_text = prompt.get("prompt_code") or prompt.get("raw_content") or ""
+    if not prompt_text.strip():
+        raise HTTPException(status_code=400, detail="Bản ghi prompt không có nội dung để cải tiến")
+
+    success, result, msg = call_ai_improve_prompt(
+        original_prompt=prompt_text,
+        instructions=payload.instruction.strip(),
+        provider=payload.provider,
+        original_parsed_json=prompt.get("parsed_json"),
+        original_prompt_type=prompt.get("prompt_type"),
+        original_title=prompt.get("title")
+    )
+
+    if not success:
+        raise HTTPException(status_code=500, detail=msg)
+
+    return {
+        "status": "success",
+        "message": msg,
+        "original_prompt_id": prompt_id,
+        "title": result.get("title") or prompt.get("title") or "Prompt đã cải tiến",
+        "prompt_type": result.get("prompt_type", "json"),
+        "prompt_code": result.get("prompt_code", ""),
+        "parsed_json": result.get("parsed_json"),
+        "fields": result.get("fields", []),
+        "explanation": result.get("explanation", ""),
+        "changes": result.get("changes", [])
+    }
+
+@router.post("/prompts/{prompt_id}/save-improved")
+def save_improved_prompt_endpoint(prompt_id: str, payload: SaveImprovedPromptRequest):
+    prompt = PromptRepository.get_prompt_by_id(prompt_id)
+    if not prompt:
+        raise HTTPException(status_code=404, detail="Prompt gốc không tồn tại")
+
+    if not payload.prompt_code or not payload.prompt_code.strip():
+        raise HTTPException(status_code=400, detail="Nội dung prompt không được để trống")
+
+    title = (payload.title or "").strip()
+    if not title:
+        title = prompt.get("title", "Prompt đã cải tiến")
+        if payload.mode == "new_version":
+            title = f"{title} (Bản cải tiến)"
+
+    if payload.mode == "new_version":
+        saved_prompt = PromptRepository.save_as_new_version(
+            parent_prompt_id=prompt_id,
+            title=title,
+            prompt_code=payload.prompt_code.strip(),
+            raw_content=payload.raw_content or payload.prompt_code.strip(),
+            prompt_type=payload.prompt_type or "json",
+            parsed_json=payload.parsed_json,
+            fields=payload.fields
+        )
+        msg = f"Đã lưu thành phiên bản mới: {title}"
+    else:
+        saved_prompt = PromptRepository.overwrite_prompt(
+            prompt_id=prompt_id,
+            title=title,
+            prompt_code=payload.prompt_code.strip(),
+            raw_content=payload.raw_content or payload.prompt_code.strip(),
+            prompt_type=payload.prompt_type or "json",
+            parsed_json=payload.parsed_json,
+            fields=payload.fields
+        )
+        msg = f"Đã lưu đè thành công câu lệnh: {title}"
+
+    if not saved_prompt:
+        raise HTTPException(status_code=500, detail="Không thể lưu câu lệnh vào CSDL")
+
+    return {
+        "status": "success",
+        "mode": payload.mode,
+        "message": msg,
+        "prompt": saved_prompt
+    }
+
+@router.post("/prompts/{prompt_id}/suggest-title")
+def suggest_prompt_title(prompt_id: str):
+    prompt = PromptRepository.get_prompt_by_id(prompt_id)
+    if not prompt:
+        raise HTTPException(status_code=404, detail="Prompt không tồn tại")
+
+    prompt_text = prompt.get("prompt_code") or prompt.get("raw_content") or ""
+    if not prompt_text.strip():
+        raise HTTPException(status_code=400, detail="Prompt không có nội dung để đặt tiêu đề")
+
+    from app.config import get_ai_config
+    import urllib.request, json, ssl, re
+
+    cfg = get_ai_config()
+    api_key = cfg.get("api_key", "").strip()
+    base_url = cfg.get("base_url", "https://api.openai.com/v1").strip()
+    model_name = cfg.get("chat_model") or cfg.get("model_name") or "gpt-4o-mini"
+    timeout = 60
+
+    system_prompt = (
+        "Bạn là một Giám đốc nghệ thuật AI (Art Director) và chuyên gia sáng tạo tiêu đề chuyên nghiệp.\n"
+        "Nhiệm vụ: Hãy đặt một tiêu đề ngắn gọn, bắt mắt, cuốn hút và mang tính miêu tả cao cho câu lệnh prompt AI.\n\n"
+        "YÊU CẦU BẮT BUỘC:\n"
+        "- Ngôn ngữ: 100% TIẾNG VIỆT. Kể cả khi câu lệnh gốc viết hoàn toàn bằng tiếng Anh hay có chứa các thuật ngữ kỹ thuật, bạn PHẢI dịch và tóm lược thành một tiêu đề hoàn toàn bằng tiếng Việt tự nhiên, chuẩn ngữ pháp, lôi cuốn.\n"
+        "- Độ dài: Từ 4 đến 10 từ.\n"
+        "- Phong cách: Ngắn gọn, súc tích, sang trọng, mang phong cách nghệ thuật/nhiếp ảnh.\n"
+        "- Định dạng: CHỈ trả về duy nhất chuỗi tiêu đề tiếng Việt, KHÔNG có ngoặc kép, KHÔNG có dấu chấm cuối câu, KHÔNG có chữ 'Tiêu đề:', KHÔNG có giải thích nào khác."
+    )
+
+    user_content = f"Hãy đặt tiêu đề bằng TIẾNG VIỆT cho câu lệnh prompt sau:\n\n{prompt_text[:2000]}"
+
+    new_title = ""
+    active_provider = (cfg.get("provider") or "openai").lower()
+    ctx = ssl.create_default_context()
+    ctx.check_hostname = False
+    ctx.verify_mode = ssl.CERT_NONE
+
+    try:
+        if active_provider == "gemini" and cfg.get("gemini_api_key"):
+            gemini_key = cfg.get("gemini_api_key")
+            g_model = cfg.get("gemini_chat_model", "gemini-2.0-flash") or "gemini-2.0-flash"
+            endpoint = f"https://generativelanguage.googleapis.com/v1beta/models/{g_model}:generateContent?key={gemini_key}"
+            payload = {
+                "system_instruction": {"parts": [{"text": system_prompt}]},
+                "contents": [{"role": "user", "parts": [{"text": user_content}]}],
+                "generationConfig": {"temperature": 0.4}
+            }
+            req = urllib.request.Request(endpoint, data=json.dumps(payload).encode("utf-8"), headers={"Content-Type": "application/json"})
+            with urllib.request.urlopen(req, timeout=timeout, context=ctx) as resp:
+                data = json.loads(resp.read().decode("utf-8", errors="ignore"))
+                parts = data.get("candidates", [])[0].get("content", {}).get("parts", [])
+                if parts:
+                    new_title = parts[0].get("text", "").strip()
+        else:
+            if not api_key:
+                raise HTTPException(status_code=500, detail="Chưa cấu hình API Key trong .env")
+
+            endpoint = f"{base_url.rstrip('/')}/chat/completions"
+            headers = {
+                "Content-Type": "application/json",
+                "Authorization": f"Bearer {api_key}"
+            }
+            payload = {
+                "model": model_name,
+                "messages": [
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_content}
+                ],
+                "temperature": 0.4,
+                "stream": False
+            }
+            req = urllib.request.Request(endpoint, data=json.dumps(payload).encode("utf-8"), headers=headers)
+            with urllib.request.urlopen(req, timeout=timeout, context=ctx) as resp:
+                data = json.loads(resp.read().decode("utf-8", errors="ignore"))
+                choices = data.get("choices", [])
+                if choices:
+                    new_title = choices[0].get("message", {}).get("content", "").strip()
+
+        # Clean title
+        new_title = re.sub(r"^[\"'\s*`]+|[\"'\s*`]+$", "", new_title)
+        new_title = re.sub(r"^(?:tiêu đề|title)\s*:\s*", "", new_title, flags=re.IGNORECASE).strip()
+        new_title = re.sub(r"^[\"'\s*`]+|[\"'\s*`]+$", "", new_title)
+
+        if not new_title:
+            raise HTTPException(status_code=500, detail="Mô hình AI không trả về tiêu đề")
+
+        # Save to database immediately
+        PromptRepository.update_prompt_title(prompt_id=prompt_id, title=new_title)
+
+        return {
+            "status": "success",
+            "prompt_id": prompt_id,
+            "title": new_title
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Lỗi AI gợi ý tiêu đề: {str(e)}")
+
 @router.post("/prompts/{prompt_id}/generate-image")
+
 def generate_image_for_prompt(prompt_id: str, payload: GenerateImageRequest):
     from app.services.image_generator import call_ai_generate_image
     prompt = PromptRepository.get_prompt_by_id(prompt_id)
@@ -189,6 +418,81 @@ def save_generated_image_endpoint(prompt_id: str, payload: SaveGeneratedImageReq
         "status": "success",
         "message": msg,
         "filename": filename,
+        "prompt": refreshed
+    }
+
+@router.post("/prompts/{prompt_id}/add-images")
+def add_images_to_prompt_endpoint(prompt_id: str, payload: AddImagesRequest):
+    import re
+    prompt = PromptRepository.get_prompt_by_id(prompt_id)
+    if not prompt:
+        raise HTTPException(status_code=404, detail="Prompt không tồn tại")
+
+    media_list = []
+    if payload.media and payload.media.strip():
+        lines = re.split(r'[\r\n,]+', payload.media.strip())
+        for l in lines:
+            cleaned = l.strip()
+            if cleaned:
+                media_list.append(cleaned)
+
+    if payload.images:
+        for img in payload.images:
+            if isinstance(img, str) and img.strip():
+                media_list.append(img.strip())
+
+    if not media_list:
+        raise HTTPException(status_code=400, detail="Vui lòng tải lên ít nhất 1 ảnh hoặc dán 1 đường link ảnh")
+
+    added_files = PromptRepository.add_multiple_images_to_prompt(prompt_id, media_list)
+
+    # Immediately download any pending URLs
+    try:
+        download_prompt_images_now(prompt_id)
+    except Exception as e:
+        print(f"[!] Warning: Immediate media download failed: {e}")
+
+    refreshed = PromptRepository.get_prompt_by_id(prompt_id)
+    return {
+        "status": "success",
+        "message": f"Đã thêm thành công {len(added_files)} ảnh tham chiếu vào câu lệnh!",
+        "added_count": len(added_files),
+        "prompt": refreshed
+    }
+
+@router.post("/prompts/{prompt_id}/reorder-images")
+def reorder_prompt_images(prompt_id: str, payload: ReorderImagesRequest):
+    prompt = PromptRepository.get_prompt_by_id(prompt_id)
+    if not prompt:
+        raise HTTPException(status_code=404, detail="Prompt không tồn tại")
+
+    PromptRepository.reorder_prompt_images(prompt_id, payload.image_ids)
+    refreshed = PromptRepository.get_prompt_by_id(prompt_id)
+    return {
+        "status": "success",
+        "message": "Đã cập nhật thứ tự ảnh thành công!",
+        "prompt": refreshed
+    }
+
+@router.delete("/prompts/{prompt_id}/images/{image_id}")
+@router.post("/prompts/{prompt_id}/delete-image")
+def delete_prompt_image(prompt_id: str, image_id: Optional[int] = None, payload: Optional[DeleteImageRequest] = None):
+    target_img_id = image_id or (payload.image_id if payload else None)
+    if not target_img_id:
+        raise HTTPException(status_code=400, detail="Thiếu ID ảnh cần xóa")
+
+    prompt = PromptRepository.get_prompt_by_id(prompt_id)
+    if not prompt:
+        raise HTTPException(status_code=404, detail="Prompt không tồn tại")
+
+    success = PromptRepository.delete_prompt_image(prompt_id, target_img_id)
+    if not success:
+        raise HTTPException(status_code=404, detail="Ảnh không tồn tại hoặc đã bị xóa")
+
+    refreshed = PromptRepository.get_prompt_by_id(prompt_id)
+    return {
+        "status": "success",
+        "message": "Đã xóa ảnh khỏi câu lệnh thành công!",
         "prompt": refreshed
     }
 

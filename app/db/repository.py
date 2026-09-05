@@ -58,9 +58,10 @@ class PromptRepository:
             if prompt_ids:
                 placeholders = ",".join("?" for _ in prompt_ids)
                 cursor.execute(f"""
-                    SELECT prompt_id, url, local_path, filename, status
+                    SELECT prompt_id, url, local_path, filename, status, order_index
                     FROM images
                     WHERE prompt_id IN ({placeholders})
+                    ORDER BY order_index ASC, id ASC
                 """, prompt_ids)
                 img_rows = cursor.fetchall()
                 img_map = {}
@@ -97,10 +98,10 @@ class PromptRepository:
 
             # Fetch images
             cursor.execute("""
-                SELECT id, prompt_id, url, local_path, filename, status, file_size
+                SELECT id, prompt_id, url, local_path, filename, status, file_size, order_index
                 FROM images
                 WHERE prompt_id = ?
-                ORDER BY id ASC
+                ORDER BY order_index ASC, id ASC
             """, (prompt_id,))
             prompt["images"] = cursor.fetchall()
 
@@ -173,12 +174,16 @@ class PromptRepository:
             for f in files:
                 fname = f.get("filename")
                 if fname:
-                    fpath = IMAGES_DIR / fname
-                    if fpath.exists():
-                        try:
-                            fpath.unlink()
-                        except Exception:
-                            pass
+                    # Check if any other prompt still uses this filename
+                    cursor.execute("SELECT COUNT(*) as count FROM images WHERE filename = ? AND prompt_id != ?", (fname, prompt_id))
+                    ref_count = cursor.fetchone().get("count", 0)
+                    if ref_count == 0:
+                        fpath = IMAGES_DIR / fname
+                        if fpath.exists():
+                            try:
+                                fpath.unlink()
+                            except Exception:
+                                pass
 
             cursor.execute("DELETE FROM prompts WHERE id = ?", (prompt_id,))
             deleted = cursor.rowcount > 0
@@ -254,14 +259,46 @@ class PromptRepository:
             """, (new_id, new_idx, title, raw_title, prompt_type, raw_content, prompt_code, parsed_json_str))
 
             # Insert images
-            for idx, img_url in enumerate(parsed_data.get("images", [])):
-                if img_url and isinstance(img_url, str):
-                    filename = f"{new_id}_img_{idx + 1}.jpg"
-                    local_path = f"images/{filename}"
-                    cursor.execute("""
-                        INSERT INTO images (prompt_id, url, local_path, filename, status, file_size)
-                        VALUES (?, ?, ?, ?, 'pending', 0)
-                    """, (new_id, img_url, local_path, filename))
+            import base64
+            from app.config import IMAGES_DIR
+            IMAGES_DIR.mkdir(parents=True, exist_ok=True)
+
+            for idx, img_item in enumerate(parsed_data.get("images", [])):
+                if img_item and isinstance(img_item, str):
+                    img_item_clean = img_item.strip()
+                    if img_item_clean.startswith("data:image/"):
+                        try:
+                            header, b64_str = img_item_clean.split(",", 1)
+                            ext = "png"
+                            if "jpeg" in header or "jpg" in header:
+                                ext = "jpg"
+                            elif "webp" in header:
+                                ext = "webp"
+                            elif "gif" in header:
+                                ext = "gif"
+
+                            filename = f"{new_id}_upload_{idx + 1}.{ext}"
+                            file_path = IMAGES_DIR / filename
+                            img_bytes = base64.b64decode(b64_str)
+                            with open(file_path, "wb") as f:
+                                f.write(img_bytes)
+
+                            local_path = f"images/{filename}"
+                            file_size = len(img_bytes)
+
+                            cursor.execute("""
+                                INSERT INTO images (prompt_id, url, local_path, filename, status, file_size)
+                                VALUES (?, ?, ?, ?, 'downloaded', ?)
+                            """, (new_id, local_path, local_path, filename, file_size))
+                        except Exception as e:
+                            print(f"[!] Error saving uploaded base64 image: {e}")
+                    else:
+                        filename = f"{new_id}_img_{idx + 1}.jpg"
+                        local_path = f"images/{filename}"
+                        cursor.execute("""
+                            INSERT INTO images (prompt_id, url, local_path, filename, status, file_size)
+                            VALUES (?, ?, ?, ?, 'pending', 0)
+                        """, (new_id, img_item_clean, local_path, filename))
 
             # Insert fields
             for f in parsed_data.get("fields", []):
@@ -292,3 +329,240 @@ class PromptRepository:
             """, (prompt_id, url or filename, local_path, filename, status, file_size))
             conn.commit()
             return True
+
+    @staticmethod
+    def add_multiple_images_to_prompt(prompt_id: str, media_items: List[str]) -> List[str]:
+        import base64
+        from app.config import IMAGES_DIR
+        IMAGES_DIR.mkdir(parents=True, exist_ok=True)
+
+        added = []
+        with get_db() as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT COUNT(*) as cnt, COALESCE(MAX(order_index), 0) as max_order FROM images WHERE prompt_id = ?", (prompt_id,))
+            row = cursor.fetchone()
+            current_count = row["cnt"]
+            max_order = row["max_order"]
+
+            for idx, img_item in enumerate(media_items):
+                if not img_item or not isinstance(img_item, str):
+                    continue
+                img_item_clean = img_item.strip()
+                if not img_item_clean:
+                    continue
+
+                item_number = current_count + idx + 1
+                new_order = max_order + idx + 1
+                if img_item_clean.startswith("data:image/"):
+                    try:
+                        header, b64_str = img_item_clean.split(",", 1)
+                        ext = "png"
+                        if "jpeg" in header or "jpg" in header:
+                            ext = "jpg"
+                        elif "webp" in header:
+                            ext = "webp"
+                        elif "gif" in header:
+                            ext = "gif"
+
+                        filename = f"{prompt_id}_add_{item_number}.{ext}"
+                        file_path = IMAGES_DIR / filename
+                        img_bytes = base64.b64decode(b64_str)
+                        with open(file_path, "wb") as f:
+                            f.write(img_bytes)
+
+                        local_path = f"images/{filename}"
+                        file_size = len(img_bytes)
+
+                        cursor.execute("""
+                            INSERT INTO images (prompt_id, url, local_path, filename, status, file_size, order_index)
+                            VALUES (?, ?, ?, ?, 'downloaded', ?, ?)
+                        """, (prompt_id, local_path, local_path, filename, file_size, new_order))
+                        added.append(filename)
+                    except Exception as e:
+                        print(f"[!] Error saving added base64 image: {e}")
+                else:
+                    filename = f"{prompt_id}_add_{item_number}.jpg"
+                    local_path = f"images/{filename}"
+                    cursor.execute("""
+                        INSERT INTO images (prompt_id, url, local_path, filename, status, file_size, order_index)
+                        VALUES (?, ?, ?, ?, 'pending', 0, ?)
+                    """, (prompt_id, img_item_clean, local_path, filename, new_order))
+                    added.append(filename)
+
+            conn.commit()
+
+        return added
+
+    @staticmethod
+    def reorder_prompt_images(prompt_id: str, image_ids: List[int]) -> bool:
+        with get_db() as conn:
+            cursor = conn.cursor()
+            for idx, img_id in enumerate(image_ids):
+                cursor.execute("""
+                    UPDATE images
+                    SET order_index = ?
+                    WHERE id = ? AND prompt_id = ?
+                """, (idx + 1, img_id, prompt_id))
+            conn.commit()
+            return True
+
+    @staticmethod
+    def delete_prompt_image(prompt_id: str, image_id: int) -> bool:
+        from app.config import IMAGES_DIR
+        filename = None
+        with get_db() as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT filename FROM images WHERE id = ? AND prompt_id = ?", (image_id, prompt_id))
+            row = cursor.fetchone()
+            if not row:
+                return False
+            filename = row.get("filename")
+            cursor.execute("DELETE FROM images WHERE id = ? AND prompt_id = ?", (image_id, prompt_id))
+            conn.commit()
+
+        # Delete local file if it exists
+        if filename:
+            try:
+                p = IMAGES_DIR / filename
+                if p.exists() and p.is_file():
+                    p.unlink()
+            except Exception as e:
+                print(f"[!] Warning deleting image file {filename}: {e}")
+        return True
+
+    @staticmethod
+    def overwrite_prompt(
+        prompt_id: str,
+        title: str,
+        prompt_code: str,
+        raw_content: Optional[str] = None,
+        prompt_type: str = "json",
+        parsed_json: Optional[Dict[str, Any]] = None,
+        fields: Optional[List[Dict[str, Any]]] = None
+    ) -> Optional[Dict[str, Any]]:
+        from app.services.parser import extract_flat_fields
+        with get_db() as conn:
+            cursor = conn.cursor()
+            parsed_json_str = json.dumps(parsed_json, ensure_ascii=False) if parsed_json else None
+            clean_raw = raw_content if raw_content is not None else prompt_code
+
+            cursor.execute("""
+                UPDATE prompts
+                SET title = ?, prompt_code = ?, raw_content = ?, prompt_type = ?, parsed_json = ?
+                WHERE id = ?
+            """, (title, prompt_code, clean_raw, prompt_type, parsed_json_str, prompt_id))
+
+            # Delete old fields
+            cursor.execute("DELETE FROM prompt_fields WHERE prompt_id = ?", (prompt_id,))
+
+            target_fields = fields
+            if target_fields is None and parsed_json:
+                target_fields = extract_flat_fields(parsed_json)
+            elif target_fields is None:
+                target_fields = [
+                    {"path": "title", "key": "title", "label": "Tiêu đề", "value": title, "type": "text", "is_list": False},
+                    {"path": "prompt_content", "key": "prompt_content", "label": "Nội dung câu lệnh", "value": prompt_code, "type": "textarea", "is_list": False}
+                ]
+
+            for f in target_fields:
+                cursor.execute("""
+                    INSERT INTO prompt_fields (prompt_id, field_path, field_key, label, field_value, field_type, is_list)
+                    VALUES (?, ?, ?, ?, ?, ?, ?)
+                """, (
+                    prompt_id,
+                    f.get("path", ""),
+                    f.get("key", ""),
+                    f.get("label", ""),
+                    str(f.get("value", "")),
+                    f.get("type", "text"),
+                    1 if f.get("is_list") else 0
+                ))
+
+            conn.commit()
+
+        return PromptRepository.get_prompt_by_id(prompt_id)
+
+    @staticmethod
+    def save_as_new_version(
+        parent_prompt_id: str,
+        title: str,
+        prompt_code: str,
+        raw_content: Optional[str] = None,
+        prompt_type: str = "json",
+        parsed_json: Optional[Dict[str, Any]] = None,
+        fields: Optional[List[Dict[str, Any]]] = None
+    ) -> Optional[Dict[str, Any]]:
+        from app.services.parser import extract_flat_fields
+        with get_db() as conn:
+            cursor = conn.cursor()
+
+            # Find max index and count
+            cursor.execute("SELECT COUNT(*), MAX(original_index) FROM prompts")
+            count_row = cursor.fetchone()
+            total_count = count_row["COUNT(*)"] if "COUNT(*)" in count_row else count_row[list(count_row.keys())[0]]
+            max_idx = count_row["MAX(original_index)"] if "MAX(original_index)" in count_row else 0
+            if max_idx is None:
+                max_idx = total_count
+
+            new_idx = max_idx + 1
+            new_id = f"prompt_{total_count + 1}"
+
+            # Ensure unique id
+            cursor.execute("SELECT id FROM prompts WHERE id = ?", (new_id,))
+            while cursor.fetchone():
+                new_idx += 1
+                new_id = f"prompt_{new_idx}"
+                cursor.execute("SELECT id FROM prompts WHERE id = ?", (new_id,))
+
+            parsed_json_str = json.dumps(parsed_json, ensure_ascii=False) if parsed_json else None
+            clean_raw = raw_content if raw_content is not None else prompt_code
+
+            # Insert new prompt record
+            cursor.execute("""
+                INSERT INTO prompts (id, original_index, title, raw_title, prompt_type, raw_content, prompt_code, parsed_json)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """, (new_id, new_idx, title, title, prompt_type, clean_raw, prompt_code, parsed_json_str))
+
+            # Copy parent images references so new version retains samples
+            if parent_prompt_id:
+                cursor.execute("""
+                    SELECT url, local_path, filename, status, file_size
+                    FROM images
+                    WHERE prompt_id = ?
+                    ORDER BY id ASC
+                """, (parent_prompt_id,))
+                parent_images = cursor.fetchall()
+                for img in parent_images:
+                    cursor.execute("""
+                        INSERT INTO images (prompt_id, url, local_path, filename, status, file_size)
+                        VALUES (?, ?, ?, ?, ?, ?)
+                    """, (new_id, img["url"], img["local_path"], img["filename"], img["status"], img["file_size"]))
+
+            # Insert fields
+            target_fields = fields
+            if target_fields is None and parsed_json:
+                target_fields = extract_flat_fields(parsed_json)
+            elif target_fields is None:
+                target_fields = [
+                    {"path": "title", "key": "title", "label": "Tiêu đề", "value": title, "type": "text", "is_list": False},
+                    {"path": "prompt_content", "key": "prompt_content", "label": "Nội dung câu lệnh", "value": prompt_code, "type": "textarea", "is_list": False}
+                ]
+
+            for f in target_fields:
+                cursor.execute("""
+                    INSERT INTO prompt_fields (prompt_id, field_path, field_key, label, field_value, field_type, is_list)
+                    VALUES (?, ?, ?, ?, ?, ?, ?)
+                """, (
+                    new_id,
+                    f.get("path", ""),
+                    f.get("key", ""),
+                    f.get("label", ""),
+                    str(f.get("value", "")),
+                    f.get("type", "text"),
+                    1 if f.get("is_list") else 0
+                ))
+
+            conn.commit()
+
+        return PromptRepository.get_prompt_by_id(new_id)
+

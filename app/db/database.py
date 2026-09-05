@@ -39,3 +39,14 @@ def ensure_database():
                 print("[!] Tables not found in database. Running migration...")
                 from scripts.migrate_json_to_sqlite import migrate
                 migrate(json_path=JSON_DATA_PATH, db_path=DB_PATH)
+
+    # Ensure order_index column exists on images table
+    with get_db() as conn:
+        cursor = conn.cursor()
+        cursor.execute("PRAGMA table_info(images)")
+        cols = [c["name"] for c in cursor.fetchall()]
+        if "order_index" not in cols:
+            print("[*] Adding order_index column to images table...")
+            cursor.execute("ALTER TABLE images ADD COLUMN order_index INTEGER DEFAULT 0")
+            cursor.execute("UPDATE images SET order_index = id WHERE order_index = 0 OR order_index IS NULL")
+            conn.commit()
