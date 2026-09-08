@@ -1,6 +1,6 @@
 import os
 from contextlib import asynccontextmanager
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Request, HTTPException
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import HTMLResponse, FileResponse
 from fastapi.middleware.cors import CORSMiddleware
@@ -50,3 +50,15 @@ async def serve_index(request: Request):
 @app.get("/health")
 async def health_check():
     return {"status": "ok", "app": "AI Prompt Studio"}
+
+# SPA routes for tab & prompt URL handling
+@app.get("/{category}", response_class=HTMLResponse)
+@app.get("/{category}/{prompt_id}", response_class=HTMLResponse)
+async def serve_spa_route(category: str, prompt_id: str = None):
+    # Avoid intercepting API, static, media or system endpoints
+    if category in ["api", "static", "media", "docs", "redoc", "openapi.json", "health", "favicon.ico"]:
+        raise HTTPException(status_code=404, detail="Not Found")
+    index_file = TEMPLATES_DIR / "index.html"
+    if index_file.exists():
+        return FileResponse(str(index_file))
+    return HTMLResponse("<h1>AI Prompt Studio is running. index.html not found in templates.</h1>")

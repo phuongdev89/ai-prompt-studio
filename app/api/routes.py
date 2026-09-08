@@ -11,10 +11,26 @@ class CreatePromptRequest(BaseModel):
     prompt: str = Field(..., description="Nội dung câu lệnh (JSON hoặc Text)")
     media: Optional[str] = Field(None, description="URL hoặc đường dẫn ảnh/video kết quả mẫu")
     images: Optional[List[str]] = Field(None, description="Danh sách URL hoặc Base64 ảnh tải lên từ máy tính")
+    category: Optional[str] = Field("character", description="Loại prompt: 'character' hoặc 'content'")
+    note: Optional[str] = Field("", description="Ghi chú / chú thích cho câu lệnh")
+    sample_content: Optional[str] = Field(None, description="Nội dung kết quả mẫu dạng văn bản")
+
+class SetPrimaryFieldRequest(BaseModel):
+    is_primary: bool = Field(..., description="Cờ đánh dấu thuộc tính chính")
+
+class GenerateContentRequest(BaseModel):
+    prompt: str = Field(..., description="Nội dung câu lệnh prompt")
+    extra_instruction: Optional[str] = Field(None, description="Yêu cầu bổ sung cho AI")
+    provider: Optional[str] = Field(None, description="Nhà cung cấp: 'openai' hoặc 'gemini'")
+
+class AddSampleContentRequest(BaseModel):
+    content: str = Field(..., description="Nội dung văn bản mẫu")
+    title: Optional[str] = Field("", description="Tiêu đề mẫu (tùy chọn)")
 
 class UpdatePromptRequest(BaseModel):
     title: Optional[str] = None
     prompt_code: Optional[str] = None
+    note: Optional[str] = None
     fields: Optional[List[Dict[str, Any]]] = None
 
 class ImprovePromptRequest(BaseModel):
@@ -52,19 +68,30 @@ class ReorderImagesRequest(BaseModel):
 class DeleteImageRequest(BaseModel):
     image_id: Optional[int] = Field(None, description="ID ảnh cần xóa")
 
+class AddTagRequest(BaseModel):
+    tag: str = Field(..., min_length=1, max_length=50, description="Tên thẻ tag cần thêm")
+
 @router.get("/prompts")
 @router.get("/prompts/")
 def list_prompts(
     q: Optional[str] = Query(None, description="Search keyword"),
-    tag: str = Query("all", description="Tag filter: all, has_img, storyboard, portrait, video"),
+    tag: str = Query("all", description="Tag filter: all, has_img, has_sample, storyboard, portrait, video, seo, live"),
+    category: Optional[str] = Query("character", description="Filter by category: 'character' or 'content'"),
     limit: Optional[int] = Query(None, description="Limit results"),
     offset: int = Query(0, description="Offset results")
 ):
-    prompts = PromptRepository.get_prompts(query=q, tag=tag, limit=limit, offset=offset)
+    query_val = q if isinstance(q, str) else None
+    tag_val = tag if isinstance(tag, str) else "all"
+    cat_val = category if isinstance(category, str) else "character"
+    limit_val = limit if isinstance(limit, int) else None
+    offset_val = offset if isinstance(offset, int) else 0
+
+    prompts = PromptRepository.get_prompts(query=query_val, tag=tag_val, category=cat_val, limit=limit_val, offset=offset_val)
     return {
         "count": len(prompts),
-        "tag": tag,
-        "query": q,
+        "tag": tag_val,
+        "category": cat_val,
+        "query": query_val,
         "items": prompts
     }
 
@@ -94,6 +121,9 @@ def create_prompt(payload: CreatePromptRequest):
         raw_media=None
     )
     parsed_data["images"] = media_list
+    parsed_data["category"] = payload.category or "character"
+    parsed_data["note"] = payload.note or ""
+    parsed_data["sample_content"] = payload.sample_content
 
     created_item = PromptRepository.create_prompt(parsed_data)
 
@@ -120,7 +150,7 @@ def get_prompt(prompt_id: str):
         raise HTTPException(status_code=404, detail="Prompt not found")
     return prompt
 
-# Support PUT, POST, and PATCH for updating prompt title
+# Support PUT, POST, and PATCH for updating prompt title & note
 @router.put("/prompts/{prompt_id}")
 @router.put("/prompts/{prompt_id}/")
 @router.post("/prompts/{prompt_id}")
@@ -132,11 +162,15 @@ def update_prompt(prompt_id: str, payload: UpdatePromptRequest):
     if not prompt:
         raise HTTPException(status_code=404, detail="Prompt not found")
     
-    success = PromptRepository.update_prompt_title(
-        prompt_id=prompt_id,
-        title=payload.title or ""
-    )
-    return {"status": "success", "updated": success}
+    updated = False
+    if payload.title is not None and payload.title.strip():
+        PromptRepository.update_prompt_title(prompt_id=prompt_id, title=payload.title.strip())
+        updated = True
+    if payload.note is not None:
+        PromptRepository.update_prompt_note(prompt_id=prompt_id, note=payload.note)
+        updated = True
+
+    return {"status": "success", "updated": updated}
 
 @router.delete("/prompts/{prompt_id}")
 @router.delete("/prompts/{prompt_id}/")
@@ -148,6 +182,89 @@ def delete_prompt(prompt_id: str):
     
     success = PromptRepository.delete_prompt(prompt_id)
     return {"status": "success", "deleted": success, "id": prompt_id}
+
+@router.post("/prompts/{prompt_id}/fields/{field_id}/primary")
+def toggle_field_primary(prompt_id: str, field_id: int, payload: SetPrimaryFieldRequest):
+    prompt = PromptRepository.get_prompt_by_id(prompt_id)
+    if not prompt:
+        raise HTTPException(status_code=404, detail="Prompt không tồn tại")
+    
+    success = PromptRepository.update_field_primary(prompt_id, field_id, payload.is_primary)
+    if not success:
+        raise HTTPException(status_code=400, detail="Không tìm thấy trường thuộc tính để cập nhật")
+    
+    return {
+        "status": "success",
+        "prompt_id": prompt_id,
+        "field_id": field_id,
+        "is_primary": payload.is_primary
+    }
+
+@router.post("/prompts/{prompt_id}/generate-content")
+def generate_content_for_prompt(prompt_id: str, payload: GenerateContentRequest):
+    from app.services.content_generator import call_ai_generate_content
+    prompt = PromptRepository.get_prompt_by_id(prompt_id)
+    if not prompt:
+        raise HTTPException(status_code=404, detail="Prompt không tồn tại")
+
+    prompt_text = payload.prompt.strip() if payload.prompt else ""
+    if not prompt_text:
+        prompt_text = prompt.get("prompt_code") or prompt.get("raw_content") or ""
+    if not prompt_text.strip():
+        raise HTTPException(status_code=400, detail="Nội dung prompt không được để trống")
+
+    success, content, msg = call_ai_generate_content(
+        prompt_text=prompt_text,
+        provider=payload.provider,
+        extra_instruction=payload.extra_instruction
+    )
+    if not success:
+        raise HTTPException(status_code=500, detail=msg)
+
+    return {
+        "status": "success",
+        "content": content,
+        "message": msg,
+        "prompt_id": prompt_id
+    }
+
+@router.post("/prompts/{prompt_id}/sample-contents")
+def add_sample_content_endpoint(prompt_id: str, payload: AddSampleContentRequest):
+    prompt = PromptRepository.get_prompt_by_id(prompt_id)
+    if not prompt:
+        raise HTTPException(status_code=404, detail="Prompt không tồn tại")
+    if not payload.content or not payload.content.strip():
+        raise HTTPException(status_code=400, detail="Nội dung content mẫu không được để trống")
+
+    new_sample = PromptRepository.add_sample_content(prompt_id, payload.content.strip(), payload.title or "")
+    if not new_sample:
+        raise HTTPException(status_code=500, detail="Không thể lưu content mẫu")
+
+    refreshed = PromptRepository.get_prompt_by_id(prompt_id)
+    return {
+        "status": "success",
+        "message": "Đã lưu content này vào kết quả mẫu!",
+        "sample": new_sample,
+        "prompt": refreshed
+    }
+
+@router.delete("/prompts/{prompt_id}/sample-contents/{content_id}")
+@router.post("/prompts/{prompt_id}/sample-contents/{content_id}/delete")
+def delete_sample_content_endpoint(prompt_id: str, content_id: int):
+    prompt = PromptRepository.get_prompt_by_id(prompt_id)
+    if not prompt:
+        raise HTTPException(status_code=404, detail="Prompt không tồn tại")
+
+    success = PromptRepository.delete_sample_content(prompt_id, content_id)
+    if not success:
+        raise HTTPException(status_code=404, detail="Content mẫu không tồn tại")
+
+    refreshed = PromptRepository.get_prompt_by_id(prompt_id)
+    return {
+        "status": "success",
+        "message": "Đã xóa content mẫu thành công!",
+        "prompt": refreshed
+    }
 
 @router.post("/prompts/{prompt_id}/convert-json")
 def convert_prompt_to_json(prompt_id: str):
@@ -520,3 +637,36 @@ def get_providers_config():
             "image_model": cfg.get("gemini_image_model", "imagen-3.0-generate-002")
         }
     }
+
+@router.get("/tags")
+@router.get("/tags/")
+def list_tags(
+    q: Optional[str] = Query(None, description="Search keyword for tag autocomplete"),
+    limit: int = Query(25, ge=1, le=100, description="Max tags to return")
+):
+    tags = PromptRepository.get_tags(query=q, limit=limit)
+    return {"tags": tags}
+
+@router.get("/prompts/{prompt_id}/tags")
+def get_prompt_tags(prompt_id: str):
+    prompt = PromptRepository.get_prompt_by_id(prompt_id)
+    if not prompt:
+        raise HTTPException(status_code=404, detail="Prompt không tồn tại")
+    return {"prompt_id": prompt_id, "tags": PromptRepository.get_prompt_tags(prompt_id)}
+
+@router.post("/prompts/{prompt_id}/tags")
+def add_prompt_tag(prompt_id: str, req: AddTagRequest):
+    prompt = PromptRepository.get_prompt_by_id(prompt_id)
+    if not prompt:
+        raise HTTPException(status_code=404, detail="Prompt không tồn tại")
+    tags = PromptRepository.add_tag_to_prompt(prompt_id, req.tag)
+    return {"status": "success", "prompt_id": prompt_id, "tags": tags}
+
+@router.delete("/prompts/{prompt_id}/tags/{tag_name}")
+def delete_prompt_tag(prompt_id: str, tag_name: str):
+    prompt = PromptRepository.get_prompt_by_id(prompt_id)
+    if not prompt:
+        raise HTTPException(status_code=404, detail="Prompt không tồn tại")
+    tags = PromptRepository.remove_tag_from_prompt(prompt_id, tag_name)
+    return {"status": "success", "prompt_id": prompt_id, "tags": tags}
+

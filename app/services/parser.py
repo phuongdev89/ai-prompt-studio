@@ -2,56 +2,7 @@ import json
 import re
 from typing import Dict, Any, List, Tuple, Optional
 
-LABEL_MAPPING = {
-    "project_metadata": "Thông tin dự án / Metadata",
-    "subject_identity_lock": "Khóa nhận diện / Identity Lock",
-    "type": "Loại bố cục / Type",
-    "layout": "Bố cục / Layout",
-    "environment": "Môi trường & Không gian / Environment",
-    "foreground_element": "Tiền cảnh / Foreground",
-    "wardrobe": "Trang phục & Phụ kiện / Wardrobe",
-    "poses_grid": "Lưới tư thế / Poses Grid",
-    "anatomy_and_textures": "Giải phẫu & Bề mặt / Anatomy & Textures",
-    "camera_settings": "Thông số máy ảnh / Camera Specs",
-    "quality_specs": "Chất lượng / Quality Specs",
-    "mandatory_output_criteria": "Tiêu chí kết quả / Mandatory Criteria",
-    "skin": "Làn da / Skin",
-    "lips": "Đôi môi / Lips",
-    "eyes": "Đôi mắt / Eyes",
-    "hair": "Kiểu tóc / Hair",
-    "clothing": "Trang phục / Clothing",
-    "outfit": "Trang phục / Outfit",
-    "pose": "Tư thế / Pose",
-    "expression": "Biểu cảm / Expression",
-    "camera": "Máy ảnh / Camera",
-    "lens": "Ống kính / Lens",
-    "lighting": "Ánh sáng / Lighting",
-    "background": "Bối cảnh / Background",
-    "setting": "Không gian / Setting",
-    "atmosphere": "Bầu không khí / Atmosphere",
-    "style": "Phong cách / Style",
-    "negative_prompt": "Prompt phủ định / Negative Prompt",
-    "aspect_ratio": "Tỉ lệ / Aspect Ratio",
-    "gender": "Giới tính / Gender",
-    "age": "Độ tuổi / Age",
-    "face": "Gương mặt / Face",
-    "description": "Mô tả / Description",
-    "energy": "Năng lượng / Energy",
-    "mood": "Tâm trạng / Mood",
-    "aesthetic": "Thẩm mỹ / Aesthetic",
-    "genre": "Thể loại / Genre",
-    "quality": "Chất lượng / Quality",
-    "resolution": "Độ phân giải / Resolution",
-    "focus": "Tiêu cự / Focus",
-    "instructions": "Hướng dẫn trích xuất / Instructions"
-}
-
-def format_label(key: str, full_path: str = "") -> str:
-    key_lower = key.lower()
-    for k_sub, v_label in LABEL_MAPPING.items():
-        if k_sub == key_lower or k_sub in key_lower:
-            return v_label
-    return key.replace("_", " ").title()
+from app.services.label_mapping import LABEL_MAPPING, format_label, format_field_label, detect_primary_fields
 
 def extract_flat_fields(data_obj: Any, prefix: str = "") -> List[Dict[str, Any]]:
     fields = []
@@ -86,7 +37,7 @@ def extract_flat_fields(data_obj: Any, prefix: str = "") -> List[Dict[str, Any]]
 
 def parse_incoming_prompt(raw_content: str, raw_media: Optional[str] = None) -> Dict[str, Any]:
     content = (raw_content or "").strip()
-    
+
     # Extract images / videos
     media_list = []
     if raw_media:
@@ -100,11 +51,11 @@ def parse_incoming_prompt(raw_content: str, raw_media: Optional[str] = None) -> 
     # Check if JSON
     s = content.find('{')
     e = content.rfind('}')
-    
+
     parsed_json = None
     prompt_type = "text"
     prompt_code = content
-    
+
     if s != -1 and e != -1 and e > s:
         raw_json_str = content[s:e+1]
         try:
@@ -130,7 +81,7 @@ def parse_incoming_prompt(raw_content: str, raw_media: Optional[str] = None) -> 
             raw_title = parsed_json["prompt"][:60]
         elif "subject" in parsed_json and isinstance(parsed_json["subject"], str):
             raw_title = parsed_json["subject"][:60]
-            
+
     title = re.sub(r'^(câu lệnh|chia sẻ câu lệnh|bộ câu lệnh|prompt|lưu lại|trả câu lệnh)\s*[-:]*\s*', '', raw_title, flags=re.IGNORECASE).strip()
     if not title:
         title = raw_title
@@ -138,10 +89,11 @@ def parse_incoming_prompt(raw_content: str, raw_media: Optional[str] = None) -> 
     # Extract dynamic fields
     if parsed_json:
         fields = extract_flat_fields(parsed_json)
+        fields = detect_primary_fields(fields)
     else:
         fields = [
-            {"path": "title", "key": "title", "label": "Tiêu đề Prompt", "value": title, "type": "text", "is_list": False},
-            {"path": "prompt_content", "key": "prompt_content", "label": "Nội dung câu lệnh (Prompt)", "value": content, "type": "textarea", "is_list": False}
+            {"path": "title", "key": "title", "label": "Tiêu đề Prompt", "value": title, "type": "text", "is_list": False, "is_primary": True},
+            {"path": "prompt_content", "key": "prompt_content", "label": "Nội dung câu lệnh (Prompt)", "value": content, "type": "textarea", "is_list": False, "is_primary": True}
         ]
 
     return {

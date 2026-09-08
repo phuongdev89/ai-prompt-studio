@@ -90,6 +90,20 @@
             </div>
         </div>
 
+        <!-- Navigation Tabs: AI Character vs Content -->
+        <div class="flex items-center bg-dark-900/90 p-1 rounded-xl border border-dark-700 shadow-inner">
+            <button id="navTabCharacter" onclick="switchNavTab('character')"
+                    class="px-3.5 py-1.5 rounded-lg text-xs font-semibold transition-all duration-200 flex items-center gap-2 bg-gradient-to-r from-brand-600 to-emerald-600 text-white shadow-md shadow-brand-600/20">
+                <i class="fa-solid fa-wand-magic-sparkles text-amber-300 text-xs"></i>
+                <span>AI Character</span>
+            </button>
+            <button id="navTabContent" onclick="switchNavTab('content')"
+                    class="px-3.5 py-1.5 rounded-lg text-xs font-medium transition-all duration-200 flex items-center gap-2 text-slate-400 hover:text-white hover:bg-dark-750">
+                <i class="fa-solid fa-file-lines text-cyan-400 text-xs"></i>
+                <span>Content</span>
+            </button>
+        </div>
+
         <div class="flex items-center space-x-3">
             <!-- Database Stats Badge -->
             <span class="inline-flex items-center px-3 py-1 rounded-full text-xs font-medium bg-dark-700 text-brand-500 border border-brand-500/30">
@@ -173,21 +187,12 @@
             <main class="flex-1 overflow-y-auto min-h-0 bg-dark-900 p-4 lg:p-6 space-y-6" id="mainContent">
 
             <!-- Detail Card Header -->
-            <div class="bg-dark-800 border border-dark-700 rounded-2xl p-5 shadow-xl relative overflow-hidden">
-                <div class="absolute -right-16 -top-16 w-64 h-64 bg-brand-500/10 rounded-full blur-3xl pointer-events-none"></div>
+            <div class="bg-dark-800 border border-dark-700 rounded-2xl p-5 shadow-xl relative z-20">
+                <div class="absolute inset-0 overflow-hidden rounded-2xl pointer-events-none">
+                    <div class="absolute -right-16 -top-16 w-64 h-64 bg-brand-500/10 rounded-full blur-3xl"></div>
+                </div>
                 <div class="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
                     <div class="space-y-1.5 flex-1 min-w-0">
-                        <div class="flex items-center gap-2 flex-wrap">
-                            <span id="currentPromptIdBadge" class="px-2 py-0.5 rounded bg-brand-500/20 text-brand-500 text-xs font-bold border border-brand-500/30">
-                                PROMPT #1
-                            </span>
-                            <span id="currentPromptTypeBadge" class="px-2 py-0.5 rounded bg-indigo-500/20 text-indigo-400 text-xs font-semibold border border-indigo-500/30">
-                                JSON Structured
-                            </span>
-                            <span id="currentImgCountBadge" class="px-2 py-0.5 rounded bg-dark-700 text-slate-300 text-xs font-medium flex items-center gap-1">
-                                <i class="fa-regular fa-image text-slate-400"></i> <span id="imgCountText">0 Ảnh</span>
-                            </span>
-                        </div>
                         <div class="flex items-center gap-2 group/title flex-wrap">
                             <h2 id="currentPromptTitle"
                                 contenteditable="true"
@@ -209,7 +214,6 @@
                             </span>
                         </div>
                     </div>
-
                     <!-- Action Buttons -->
                     <div class="flex items-center gap-2.5 flex-wrap">
                         <button onclick="openImproveModal()" id="improvePromptBtn" class="px-4 py-2.5 rounded-xl bg-gradient-to-r from-emerald-600 via-teal-600 to-cyan-600 hover:from-emerald-500 hover:via-teal-500 hover:to-cyan-500 text-white font-semibold text-sm shadow-lg shadow-emerald-600/30 flex items-center gap-2 transition active:scale-95" title="Cải tiến câu lệnh bằng AI">
@@ -233,16 +237,44 @@
                             <span class="hidden sm:inline">Xóa</span>
                         </button>
                     </div>
+                </div>
+                <!-- Select2-style Tags Area with Autocomplete -->
+                <div class="pt-2 flex items-start sm:items-center gap-2 flex-wrap text-xs">
+                    <span class="text-slate-400 font-medium flex items-center gap-1.5 flex-shrink-0 pt-1 sm:pt-0 select-none">
+                        <i class="fa-solid fa-tags text-brand-400 text-xs"></i>
+                        <span class="hidden sm:inline">Tags:</span>
+                    </span>
+                    <div id="select2TagsWrapper" class="relative flex-1 min-w-[220px] max-w-full">
+                        <div id="tagsContainer" onclick="focusTagInput()"
+                             class="flex items-center gap-1.5 flex-wrap p-1.5 min-h-[36px] rounded-xl bg-dark-900/90 border border-dark-700/80 focus-within:border-brand-500/70 focus-within:ring-1 focus-within:ring-brand-500/30 transition shadow-inner cursor-text">
+                            <!-- Tag chips will be injected dynamically via app.js -->
+                            <div id="tagChipsList" class="flex items-center gap-1.5 flex-wrap"></div>
 
+                            <!-- Inline tag input -->
+                            <input type="text" id="tagInput"
+                                   placeholder="+ Thêm tag (gõ & Enter)..."
+                                   autocomplete="off"
+                                   spellcheck="false"
+                                   class="bg-transparent text-xs text-slate-100 placeholder-slate-500 focus:outline-none min-w-[120px] flex-1 py-1 px-1 font-medium">
+                        </div>
+
+                        <!-- Autocomplete Dropdown Menu -->
+                        <div id="tagAutocompleteDropdown"
+                             class="absolute left-0 top-full mt-1.5 w-full sm:w-80 max-h-64 overflow-y-auto bg-dark-800/95 backdrop-blur-md border border-dark-700 rounded-xl shadow-2xl z-50 hidden py-1 text-xs divide-y divide-dark-700/50">
+                            <!-- Autocomplete suggestions injected dynamically -->
+                        </div>
+                    </div>
                 </div>
             </div>
 
             <!-- Two-Column Grid: Images (Left/Top) and Parametric Form + Code Output -->
             <div class="grid grid-cols-1 xl:grid-cols-12 gap-6">
 
-                <!-- Left Column (5 Cols on XL): Image Slider & Media Preview -->
+                <!-- Left Column (5 Cols on XL): Image Slider (AI Character) OR Content Mẫu (Content) -->
                 <div class="xl:col-span-5 space-y-6">
-                    <div class="bg-dark-800 border border-dark-700 rounded-2xl p-4 shadow-lg space-y-3">
+
+                    <!-- Mode 1: Image Slider & Media Preview (Tab AI Character) -->
+                    <div id="imageSliderContainer" class="bg-dark-800 border border-dark-700 rounded-2xl p-4 shadow-lg space-y-3">
                         <div class="flex items-center justify-between border-b border-dark-700/80 pb-3 flex-wrap gap-2">
                             <div class="flex items-center gap-2.5 flex-wrap">
                                 <h3 class="font-semibold text-slate-200 text-sm flex items-center gap-2">
@@ -295,6 +327,78 @@
                             <!-- Thumbnails rendered dynamically -->
                         </div>
                     </div>
+
+                    <!-- Mode 2: Content Mẫu (Tab Content) - Hiển thị dạng Text -->
+                    <div id="sampleContentContainer" class="hidden bg-dark-800 border border-dark-700 rounded-2xl p-4 shadow-lg space-y-3">
+                        <div class="flex items-center justify-between border-b border-dark-700/80 pb-3 flex-wrap gap-2">
+                            <div class="flex items-center gap-2.5 flex-wrap">
+                                <h3 class="font-semibold text-slate-200 text-sm flex items-center gap-2">
+                                    <i class="fa-solid fa-file-lines text-cyan-400"></i>
+                                    <span>Content mẫu & Kết quả tham chiếu</span>
+                                </h3>
+                                <button type="button" onclick="openAddSampleModal()" id="btnAddSampleContent"
+                                        class="px-2.5 py-1 rounded-lg bg-cyan-500/15 hover:bg-cyan-600 text-cyan-300 hover:text-white border border-cyan-500/30 hover:border-transparent text-xs font-medium transition flex items-center gap-1.5 shadow-sm active:scale-95"
+                                        title="Thêm một kết quả mẫu dạng văn bản mới cho câu lệnh này">
+                                    <i class="fa-solid fa-plus text-[11px]"></i>
+                                    <span>Thêm mẫu mới</span>
+                                </button>
+                            </div>
+                            <div class="flex items-center gap-2">
+                                <span id="sampleStatsBadge" class="text-[11px] text-slate-400 font-mono px-2 py-0.5 rounded bg-dark-900 border border-dark-700">0 từ</span>
+                                <span id="sampleSliderCounter" class="text-xs text-slate-400 font-mono px-2 py-0.5 rounded bg-dark-900 border border-dark-700">0 / 0</span>
+                            </div>
+                        </div>
+
+                        <!-- Sample Content Card -->
+                        <div class="relative rounded-xl overflow-hidden bg-dark-900 border border-dark-700 flex flex-col min-h-[380px] max-h-[520px]">
+                            <!-- Title / Header tag -->
+                            <div id="sampleContentHeader" class="px-3.5 py-2 bg-dark-850 border-b border-dark-750 flex items-center justify-between text-xs text-slate-400">
+                                <span id="sampleContentTitle" class="font-semibold text-cyan-400 flex items-center gap-1.5 truncate">
+                                    <i class="fa-solid fa-bookmark text-[11px]"></i>
+                                    <span>Content mẫu #1</span>
+                                </span>
+                                <span id="sampleContentDate" class="text-[10px] text-slate-500 font-mono">--:--</span>
+                            </div>
+
+                            <!-- Main Scrollable Text Content -->
+                            <div id="sampleContentText" class="p-4 text-xs sm:text-sm font-sans text-slate-200 overflow-y-auto leading-relaxed whitespace-pre-wrap select-text flex-1">
+                                <!-- Injected by JS -->
+                            </div>
+
+                            <!-- Placeholder when no sample content -->
+                            <div id="noSampleContentPlaceholder" class="hidden flex-1 flex-col items-center justify-center p-8 text-center text-slate-500">
+                                <div class="w-16 h-16 rounded-2xl bg-dark-800 border border-dark-700 flex items-center justify-center mb-3 text-cyan-400">
+                                    <i class="fa-solid fa-file-circle-plus text-2xl"></i>
+                                </div>
+                                <p class="text-sm font-medium text-slate-300">Chưa có content mẫu</p>
+                                <p class="text-xs text-slate-500 mt-1 max-w-xs">Bấm "Sử dụng prompt này" ở bên cạnh để AI sinh nội dung và lưu vào đây.</p>
+                            </div>
+
+                            <!-- Bottom Action Toolbar -->
+                            <div id="sampleContentToolbar" class="px-3 py-2 bg-dark-850 border-t border-dark-750 flex items-center justify-between gap-2 flex-wrap">
+                                <div class="flex items-center gap-1.5">
+                                    <button id="samplePrevBtn" onclick="prevSampleContent()" class="w-8 h-8 rounded-lg bg-dark-750 hover:bg-dark-700 text-slate-300 hover:text-white flex items-center justify-center transition disabled:opacity-30 disabled:pointer-events-none" title="Mẫu trước">
+                                        <i class="fa-solid fa-chevron-left text-xs"></i>
+                                    </button>
+                                    <button id="sampleNextBtn" onclick="nextSampleContent()" class="w-8 h-8 rounded-lg bg-dark-750 hover:bg-dark-700 text-slate-300 hover:text-white flex items-center justify-center transition disabled:opacity-30 disabled:pointer-events-none" title="Mẫu tiếp theo">
+                                        <i class="fa-solid fa-chevron-right text-xs"></i>
+                                    </button>
+                                </div>
+
+                                <div class="flex items-center gap-2">
+                                    <button type="button" onclick="deleteCurrentSampleContent()" id="btnDeleteSample" class="px-2.5 py-1.5 rounded-lg bg-rose-500/10 hover:bg-rose-500 text-rose-400 hover:text-white text-xs font-medium border border-rose-500/30 transition flex items-center gap-1.5 active:scale-95" title="Xóa mẫu này">
+                                        <i class="fa-regular fa-trash-can text-xs"></i>
+                                        <span>Xóa mẫu</span>
+                                    </button>
+                                    <button type="button" onclick="copyCurrentSampleContent()" id="btnCopySample" class="px-3 py-1.5 rounded-lg bg-cyan-600 hover:bg-cyan-500 text-white text-xs font-semibold shadow-md shadow-cyan-600/20 transition flex items-center gap-1.5 active:scale-95">
+                                        <i class="fa-solid fa-copy text-xs"></i>
+                                        <span>Sao chép Content</span>
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
                 </div>
 
                 <!-- Right Column (7 Cols on XL): Form Bóc Tách & Code Display -->
@@ -312,11 +416,13 @@
                             </div>
                             <!-- Form tabs -->
                             <div class="flex bg-dark-900 p-1 rounded-lg border border-dark-700 text-xs">
-                                <button onclick="setFormTab('featured')" id="tabBtnFeatured" class="px-3 py-1 rounded-md bg-dark-700 text-white font-medium transition">
-                                    Thuộc tính chính
+                                <button onclick="setFormTab('featured')" id="tabBtnFeatured" class="px-3 py-1 rounded-md bg-dark-700 text-white font-medium transition flex items-center gap-1.5">
+                                    <span>Thuộc tính chính</span>
+                                    <span id="featuredFieldsCount" class="text-[10px] font-mono font-bold px-1.5 py-0.5 rounded bg-amber-500/15 text-amber-400 border border-amber-500/30">0</span>
                                 </button>
-                                <button onclick="setFormTab('all')" id="tabBtnAll" class="px-3 py-1 rounded-md text-slate-400 hover:text-white transition">
-                                    Toàn bộ trường (<span id="allFieldsCount">0</span>)
+                                <button onclick="setFormTab('all')" id="tabBtnAll" class="px-3 py-1 rounded-md text-slate-400 hover:text-white transition flex items-center gap-1.5">
+                                    <span>Toàn bộ trường</span>
+                                    <span id="allFieldsCount" class="text-[10px] font-mono px-1.5 py-0.5 rounded bg-dark-800 text-slate-300 border border-dark-600">0</span>
                                 </button>
                             </div>
                         </div>
@@ -325,6 +431,15 @@
                         <form id="dynamicParamForm" class="space-y-4 max-h-[520px] overflow-y-auto pr-2" onsubmit="event.preventDefault();">
                             <!-- Injected by JavaScript based on active prompt -->
                         </form>
+
+                        <!-- Button: Sử dụng prompt này (Visible in Content tab, placed directly below Tuỳ biến tham số) -->
+                        <div id="usePromptActionSection" class="pt-3 border-t border-dark-700/70 hidden">
+                            <button type="button" onclick="openUsePromptModal()" id="btnUsePromptContent"
+                                    class="w-full py-3 px-4 rounded-xl bg-gradient-to-r from-cyan-600 via-teal-600 to-emerald-600 hover:from-cyan-500 hover:via-teal-500 hover:to-emerald-500 text-white font-bold text-sm shadow-xl shadow-cyan-600/25 flex items-center justify-center gap-2.5 transition transform active:scale-[0.98]">
+                                <i class="fa-solid fa-paper-plane text-amber-300 text-sm animate-pulse"></i>
+                                <span>Sử dụng prompt này</span>
+                            </button>
+                        </div>
                     </div>
 
                     <!-- Prompt Code Output (Thẻ code) -->
@@ -391,8 +506,8 @@
 
             <!-- Modal Form (2 fields as requested) -->
             <form id="createPromptForm" onsubmit="event.preventDefault(); submitCreatePrompt(event); return false;" class="p-6 space-y-4">
-                <!-- Field 1: Media (Upload files or Paste links) -->
-                <div class="space-y-2">
+                <!-- Field 1A: Media for Character (Upload files or Paste links) -->
+                <div id="createCharacterMediaWrapper" class="space-y-2">
                     <div class="flex items-center justify-between">
                         <label class="text-xs font-semibold text-slate-200 flex items-center gap-1.5">
                             <i class="fa-regular fa-image text-brand-500"></i>
@@ -450,6 +565,32 @@
                         <input type="text" id="newMediaInput" placeholder="Dán link ảnh/video (VD: https://... hoặc nhiều link phân cách bằng dấu phẩy)"
                                class="w-full px-3.5 py-2.5 bg-dark-900 text-slate-100 text-xs rounded-xl border border-dark-700 focus:outline-none focus:border-brand-500 focus:ring-1 focus:ring-brand-500 placeholder-slate-500 transition">
                         <p class="text-[11px] text-slate-500">Hệ thống sẽ tự động tải ảnh về lưu trữ cục bộ trên máy chủ.</p>
+                    </div>
+                </div>
+
+                <!-- Field 1B: Note & Sample Content for Content Tab -->
+                <div id="createContentWrapper" class="hidden space-y-3">
+                    <div class="space-y-1.5">
+                        <label for="newNoteInput" class="text-xs font-semibold text-slate-200 flex items-center gap-1.5">
+                            <i class="fa-solid fa-note-sticky text-amber-400"></i>
+                            <span>Chú thích / Ghi chú</span>
+                            <span class="text-slate-500 font-normal">(Hiển thị trên menu tìm kiếm)</span>
+                        </label>
+                        <input type="text" id="newNoteInput"
+                               placeholder="Ví dụ: Kịch bản video TikTok 60s KOC Review mỹ phẩm, tỷ lệ chốt đơn cao..."
+                               class="w-full px-3.5 py-2.5 bg-dark-900 text-slate-100 text-xs rounded-xl border border-dark-700 focus:outline-none focus:border-cyan-500 focus:ring-1 focus:ring-cyan-500 placeholder-slate-500 transition">
+                    </div>
+                    <div class="space-y-1.5">
+                        <label for="newSampleContentInput" class="text-xs font-semibold text-slate-200 flex items-center justify-between">
+                            <span class="flex items-center gap-1.5">
+                                <i class="fa-solid fa-file-lines text-cyan-400"></i>
+                                <span>Content mẫu / Kết quả mẫu</span>
+                                <span class="text-slate-500 font-normal">(Tùy chọn)</span>
+                            </span>
+                        </label>
+                        <textarea id="newSampleContentInput" rows="4"
+                                  placeholder="Dán nội dung bài viết hoặc kịch bản mẫu vào đây nếu có..."
+                                  class="w-full px-3.5 py-2.5 bg-dark-900 text-slate-100 text-xs rounded-xl border border-dark-700 focus:outline-none focus:border-cyan-500 focus:ring-1 focus:ring-cyan-500 placeholder-slate-500 transition leading-relaxed"></textarea>
                     </div>
                 </div>
 
@@ -1126,6 +1267,205 @@
         </div>
     </div>
 
+    <!-- Modal: Sử dụng Prompt này (Đợi response content & lưu vào kết quả mẫu) -->
+    <div id="usePromptModal" class="fixed inset-0 z-50 bg-black/80 backdrop-blur-md hidden flex items-center justify-center p-3 sm:p-4 overflow-y-auto">
+        <div class="bg-dark-800 border border-dark-700 rounded-2xl w-full max-w-3xl my-auto overflow-hidden shadow-2xl animate-fade-in flex flex-col max-h-[92vh]">
+            
+            <!-- Modal Header -->
+            <div class="px-6 py-4 border-b border-dark-700 flex items-center justify-between bg-dark-850 flex-shrink-0">
+                <div class="flex items-center space-x-3">
+                    <div class="w-9 h-9 rounded-xl bg-gradient-to-tr from-cyan-600 via-teal-600 to-emerald-600 text-white flex items-center justify-center shadow-lg shadow-cyan-600/30">
+                        <i class="fa-solid fa-paper-plane text-sm"></i>
+                    </div>
+                    <div>
+                        <h3 class="font-bold text-white text-base flex items-center gap-2">
+                            <span>Sử dụng Prompt để tạo Content</span>
+                            <span id="usePromptBadge" class="text-[11px] font-mono px-2 py-0.5 rounded bg-dark-700 text-cyan-400 border border-cyan-500/30">#CONTENT</span>
+                        </h3>
+                        <p class="text-xs text-slate-400">Gửi câu lệnh đã tùy biến qua AI và nhận bài viết hoàn chỉnh</p>
+                    </div>
+                </div>
+                <button onclick="closeUsePromptModal()" class="w-8 h-8 rounded-lg text-slate-400 hover:text-white hover:bg-dark-700 flex items-center justify-center transition">
+                    <i class="fa-solid fa-xmark text-base"></i>
+                </button>
+            </div>
+
+            <!-- Modal Content (Scrollable) -->
+            <div class="p-5 sm:p-6 space-y-5 overflow-y-auto flex-1">
+                
+                <!-- Error Banner -->
+                <div id="usePromptErrorBanner" class="hidden p-3.5 rounded-xl bg-rose-500/15 border border-rose-500/40 text-rose-300 text-xs flex items-start gap-2.5">
+                    <i class="fa-solid fa-triangle-exclamation text-rose-400 text-sm mt-0.5 flex-shrink-0"></i>
+                    <div class="flex-1 min-w-0" id="usePromptErrorText">Đã xảy ra lỗi khi tạo content.</div>
+                    <button onclick="document.getElementById('usePromptErrorBanner').classList.add('hidden')" class="text-rose-400 hover:text-rose-200">
+                        <i class="fa-solid fa-xmark"></i>
+                    </button>
+                </div>
+
+                <!-- AI Provider Selector -->
+                <div class="p-3 bg-dark-900/90 rounded-xl border border-dark-700 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                    <div class="flex items-center gap-2">
+                        <span class="text-xs font-semibold text-slate-200 flex items-center gap-1.5">
+                            <i class="fa-solid fa-server text-cyan-400"></i>
+                            <span>Nguồn AI (Provider):</span>
+                        </span>
+                        <span id="usePromptProviderBadge" class="text-[11px] font-mono px-2 py-0.5 rounded bg-dark-800 text-cyan-300 border border-cyan-500/30">Custom OpenAI</span>
+                    </div>
+                    <div class="inline-flex p-1 bg-dark-800 rounded-xl border border-dark-700 gap-1 text-xs">
+                        <button type="button" onclick="setUsePromptProvider('openai')" id="btnUsePromptOpenAI"
+                                class="px-3 py-1.5 rounded-lg font-medium transition flex items-center gap-1.5 bg-cyan-600 text-white shadow">
+                            <i class="fa-solid fa-network-wired text-xs"></i>
+                            <span>Custom OpenAI</span>
+                        </button>
+                        <button type="button" onclick="setUsePromptProvider('gemini')" id="btnUsePromptGemini"
+                                class="px-3 py-1.5 rounded-lg font-medium transition flex items-center gap-1.5 text-slate-400 hover:text-white">
+                            <i class="fa-brands fa-google text-xs text-amber-400"></i>
+                            <span>Google Gemini</span>
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Current Prompt Preview (Collapsible) -->
+                <div class="space-y-1.5">
+                    <div class="flex items-center justify-between">
+                        <label class="text-xs font-semibold text-slate-300 flex items-center gap-1.5">
+                            <i class="fa-solid fa-code text-indigo-400"></i>
+                            <span>Prompt sẽ gửi đi (Lấy từ tham số tùy biến hiện tại):</span>
+                        </label>
+                        <button type="button" onclick="toggleUsePromptPreview()" id="btnToggleUsePromptPreview" class="text-[11px] text-cyan-400 hover:text-cyan-300 flex items-center gap-1">
+                            <span id="toggleUsePromptText">Thu gọn</span>
+                            <i id="toggleUsePromptIcon" class="fa-solid fa-chevron-up text-[10px]"></i>
+                        </button>
+                    </div>
+                    <div id="usePromptPreviewWrapper" class="transition-all duration-200 overflow-hidden">
+                        <pre id="usePromptPreviewText" class="p-3 bg-dark-900/90 text-emerald-400 text-xs font-mono rounded-xl border border-dark-700 max-h-36 overflow-y-auto whitespace-pre-wrap break-words leading-relaxed"></pre>
+                    </div>
+                </div>
+
+                <!-- Extra Custom Instruction / Context -->
+                <div class="space-y-1.5">
+                    <label for="usePromptExtraInput" class="text-xs font-semibold text-slate-200 flex items-center justify-between">
+                        <span class="flex items-center gap-1.5">
+                            <i class="fa-solid fa-pen-nib text-teal-400"></i>
+                            Yêu cầu bổ sung / Ghi chú cho AI (Tùy chọn)
+                        </span>
+                        <span class="text-[11px] text-slate-400">Thêm góc nhìn hoặc bối cảnh riêng</span>
+                    </label>
+                    <input type="text" id="usePromptExtraInput"
+                           placeholder="Ví dụ: Giọng văn hài hước hóm hỉnh, thêm 3 hashtag thịnh hành, nhấn mạnh chương trình freeship..."
+                           class="w-full px-3.5 py-2.5 bg-dark-900 text-slate-100 text-xs rounded-xl border border-dark-700 focus:outline-none focus:border-cyan-500 focus:ring-1 focus:ring-cyan-500 placeholder-slate-500 transition">
+                </div>
+
+                <!-- Trigger Generate Button -->
+                <div class="flex items-center justify-end">
+                    <button type="button" onclick="submitGenerateContent()" id="btnSubmitGenerateContent"
+                            class="px-5 py-2.5 rounded-xl bg-gradient-to-r from-cyan-600 via-teal-600 to-emerald-600 hover:from-cyan-500 hover:via-teal-500 hover:to-emerald-500 text-white text-xs font-bold shadow-lg shadow-cyan-600/30 flex items-center gap-2 transition active:scale-95">
+                        <i class="fa-solid fa-bolt text-amber-300"></i>
+                        <span id="btnSubmitGenerateContentText">Gửi AI & Tạo Content</span>
+                    </button>
+                </div>
+
+                <!-- Loading State Indicator (Hidden by default) -->
+                <div id="usePromptLoadingState" class="hidden p-6 rounded-xl bg-dark-900/90 border border-cyan-500/30 text-center space-y-3">
+                    <div class="w-12 h-12 mx-auto rounded-2xl bg-cyan-500/10 flex items-center justify-center text-cyan-400 text-2xl animate-pulse">
+                        <i class="fa-solid fa-circle-notch fa-spin"></i>
+                    </div>
+                    <div class="space-y-1">
+                        <div class="text-sm font-semibold text-white">Đang đợi response content từ AI...</div>
+                        <p class="text-xs text-slate-400" id="usePromptLoadingTimer">Đang kết nối tới mô hình AI...</p>
+                    </div>
+                    <div class="w-48 h-1.5 bg-dark-800 rounded-full mx-auto overflow-hidden">
+                        <div class="h-full bg-gradient-to-r from-cyan-500 via-teal-500 to-emerald-500 rounded-full animate-pulse w-full"></div>
+                    </div>
+                </div>
+
+                <!-- Generated Response Section -->
+                <div id="usePromptResultSection" class="hidden space-y-3 pt-2 border-t border-dark-700/80">
+                    <div class="flex items-center justify-between">
+                        <div class="flex items-center gap-2">
+                            <span class="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-pulse"></span>
+                            <span class="text-xs font-bold text-white uppercase tracking-wider">Nội dung Content phản hồi từ AI</span>
+                        </div>
+                        <span id="usePromptWordCountBadge" class="text-[11px] font-mono px-2 py-0.5 rounded bg-dark-800 text-cyan-300 border border-cyan-500/30">0 từ</span>
+                    </div>
+
+                    <!-- Editable Result Box -->
+                    <div class="relative rounded-xl overflow-hidden border border-cyan-500/30">
+                        <textarea id="usePromptResultText" rows="10"
+                                  class="w-full p-4 bg-dark-900 text-xs sm:text-sm font-sans rounded-xl border border-dark-700 focus:outline-none focus:border-cyan-500 focus:ring-1 focus:ring-cyan-500 leading-relaxed whitespace-pre-wrap select-text"
+                                  placeholder="Nội dung phản hồi từ AI sẽ xuất hiện tại đây. Bạn có thể chỉnh sửa trực tiếp trước khi lưu..."></textarea>
+                    </div>
+
+                    <!-- Auto-save Checkbox & Hint -->
+                    <div class="flex items-center justify-between pt-1 flex-wrap gap-2">
+                        <label class="flex items-center gap-2 text-xs text-slate-300 cursor-pointer select-none">
+                            <input type="checkbox" id="chkAutoSaveSample" checked class="w-4 h-4 rounded text-cyan-500 bg-dark-900 border-dark-700 focus:ring-cyan-500">
+                            <span>Lưu content này vào kết quả mẫu của câu lệnh</span>
+                        </label>
+                        <span class="text-[11px] text-slate-500">Có thể dán nội dung từ ChatGPT/Claude vào đây để lưu</span>
+                    </div>
+                </div>
+
+            </div>
+
+            <!-- Modal Footer -->
+            <div class="px-6 py-4 border-t border-dark-700 bg-dark-850 flex items-center justify-between gap-3 flex-shrink-0 flex-wrap">
+                <button type="button" onclick="closeUsePromptModal()"
+                        class="px-4 py-2 rounded-xl bg-dark-700 hover:bg-dark-600 text-slate-300 hover:text-white text-xs font-medium transition">
+                    Đóng
+                </button>
+                <div class="flex items-center gap-2.5 flex-wrap">
+                    <button type="button" onclick="copyUsePromptResult()" id="btnCopyUsePromptResult" disabled
+                            class="px-3.5 py-2 rounded-xl bg-dark-750 hover:bg-dark-700 disabled:opacity-30 disabled:pointer-events-none text-slate-200 hover:text-white text-xs font-medium border border-dark-700 transition flex items-center gap-1.5 active:scale-95">
+                        <i class="fa-solid fa-copy text-xs"></i>
+                        <span>Sao chép</span>
+                    </button>
+                    <button type="button" onclick="saveGeneratedContentToSample()" id="btnSaveUsePromptResult" disabled
+                            class="px-5 py-2 rounded-xl bg-gradient-to-r from-cyan-600 to-emerald-600 hover:from-cyan-500 hover:to-emerald-500 disabled:opacity-30 disabled:pointer-events-none text-white text-xs font-bold shadow-lg shadow-cyan-600/25 flex items-center gap-1.5 transition active:scale-95">
+                        <i class="fa-solid fa-floppy-disk text-xs"></i>
+                        <span>Lưu vào kết quả mẫu</span>
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Add Sample Content Manual Modal -->
+    <div id="addSampleContentModal" class="fixed inset-0 z-50 bg-black/80 backdrop-blur-md hidden flex items-center justify-center p-4">
+        <div class="bg-dark-800 border border-dark-700 rounded-2xl w-full max-w-lg overflow-hidden shadow-2xl animate-fade-in">
+            <div class="px-6 py-4 border-b border-dark-700 flex items-center justify-between bg-dark-850">
+                <div class="flex items-center space-x-2.5">
+                    <div class="w-8 h-8 rounded-lg bg-cyan-500/20 text-cyan-400 flex items-center justify-center">
+                        <i class="fa-solid fa-plus text-sm"></i>
+                    </div>
+                    <div>
+                        <h3 class="font-bold text-white text-base">Thêm kết quả content mẫu</h3>
+                        <p class="text-xs text-slate-400">Lưu một văn bản mẫu tham chiếu cho câu lệnh này</p>
+                    </div>
+                </div>
+                <button onclick="closeAddSampleModal()" class="w-8 h-8 rounded-lg text-slate-400 hover:text-white hover:bg-dark-700 flex items-center justify-center transition">
+                    <i class="fa-solid fa-xmark text-base"></i>
+                </button>
+            </div>
+            <div class="p-6 space-y-3">
+                <div class="space-y-1">
+                    <label class="text-xs font-semibold text-slate-300">Tiêu đề mẫu (Tùy chọn)</label>
+                    <input type="text" id="manualSampleTitleInput" placeholder="Ví dụ: Kịch bản chốt đơn đợt 1..."
+                           class="w-full px-3 py-2 bg-dark-900 text-slate-100 text-xs rounded-xl border border-dark-700 focus:outline-none focus:border-cyan-500 transition">
+                </div>
+                <div class="space-y-1">
+                    <label class="text-xs font-semibold text-slate-300">Nội dung văn bản mẫu <span class="text-rose-400">*</span></label>
+                    <textarea id="manualSampleTextInput" rows="8" placeholder="Dán nội dung kết quả mẫu vào đây..."
+                              class="w-full px-3 py-2 bg-dark-900 text-slate-100 text-xs rounded-xl border border-dark-700 focus:outline-none focus:border-cyan-500 transition leading-relaxed"></textarea>
+                </div>
+                <div class="flex items-center justify-end gap-2 pt-2">
+                    <button type="button" onclick="closeAddSampleModal()" class="px-4 py-2 rounded-xl bg-dark-700 text-slate-300 text-xs font-medium">Hủy</button>
+                    <button type="button" onclick="submitAddManualSample()" class="px-5 py-2 rounded-xl bg-cyan-600 hover:bg-cyan-500 text-white text-xs font-bold shadow transition">Lưu mẫu</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <!-- Lightbox Modal with Zoom & Pan Controls -->
     <div id="lightboxModal" class="fixed inset-0 z-50 bg-black/95 backdrop-blur-md hidden flex flex-col items-center justify-center overflow-hidden select-none">
         <!-- Top Toolbar -->
@@ -1175,7 +1515,7 @@
     </div>
 
     <!-- App JavaScript Logic -->
-    <script src="/static/js/app.js?v=1.2.2"></script>
+    <script src="/static/js/app.js?v=3.2.0"></script>
 </body>
 
 </html>

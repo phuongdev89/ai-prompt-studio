@@ -28,7 +28,7 @@ def get_ai_config():
     
     # Gemini Direct Official API
     gemini_api_key = os.getenv("GEMINI_API_KEY", "").strip().strip('"').strip("'")
-    gemini_chat_model = (os.getenv("GEMINI_CHAT_MODEL") or "gemini-2.0-flash").strip().strip('"').strip("'")
+    gemini_chat_model = (os.getenv("GEMINI_CHAT_MODEL") or "gemini-2.5-flash").strip().strip('"').strip("'")
     gemini_image_model = (os.getenv("GEMINI_IMAGE_MODEL") or "imagen-3.0-generate-002").strip().strip('"').strip("'")
 
     timeout = int(os.getenv("AI_TIMEOUT", "300"))

@@ -5,6 +5,10 @@ import sys
 from pathlib import Path
 
 BASE_DIR = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(BASE_DIR))
+
+from app.services.label_mapping import LABEL_MAPPING, format_label, format_field_label
+
 DATA_DIR = BASE_DIR / "data"
 RAW_DATA_FILE = DATA_DIR / "raw" / "facebook_posts.json"
 BACKUP_FILE = DATA_DIR / "raw" / "facebook_posts.backup.json"
@@ -56,45 +60,7 @@ def extract_flat_fields(data_obj, prefix=""):
                 fields.extend(extract_flat_fields(v, full_key))
     return fields
 
-def format_label(key, full_path=""):
-    key_lower = key.lower()
-    mapping = {
-        "type": "Loại bố cục / Type",
-        "layout": "Bố cục / Layout",
-        "skin": "Làn da / Skin",
-        "lips": "Đôi môi / Lips",
-        "eyes": "Đôi mắt / Eyes",
-        "hair": "Kiểu tóc / Hair",
-        "clothing": "Trang phục / Clothing",
-        "outfit": "Trang phục / Outfit",
-        "pose": "Tư thế / Pose",
-        "expression": "Biểu cảm / Expression",
-        "camera": "Máy ảnh / Camera",
-        "lens": "Ống kính / Lens",
-        "lighting": "Ánh sáng / Lighting",
-        "background": "Bối cảnh / Background",
-        "setting": "Không gian / Setting",
-        "atmosphere": "Bầu không khí / Atmosphere",
-        "style": "Phong cách / Style",
-        "negative_prompt": "Prompt phủ định / Negative Prompt",
-        "aspect_ratio": "Tỉ lệ / Aspect Ratio",
-        "gender": "Giới tính / Gender",
-        "age": "Độ tuổi / Age",
-        "face": "Gương mặt / Face",
-        "description": "Mô tả / Description",
-        "energy": "Năng lượng / Energy",
-        "mood": "Tâm trạng / Mood",
-        "aesthetic": "Thẩm mỹ / Aesthetic",
-        "genre": "Thể loại / Genre",
-        "quality": "Chất lượng / Quality",
-        "resolution": "Độ phân giải / Resolution",
-        "focus": "Tiêu cự / Focus",
-        "instructions": "Hướng dẫn trích xuất / Instructions"
-    }
-    for k_sub, v_label in mapping.items():
-        if k_sub == key_lower or k_sub in key_lower:
-            return v_label
-    return key.replace("_", " ").title()
+
 
 def clean_dataset(source_file=None, output_file=None):
     if source_file is None:

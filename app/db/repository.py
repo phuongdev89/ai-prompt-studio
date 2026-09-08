@@ -2,11 +2,12 @@ import json
 import sqlite3
 from typing import List, Dict, Any, Optional
 from app.db.database import get_db
+from app.services.label_mapping import format_field_label, detect_primary_fields
 
 class PromptRepository:
 
     @staticmethod
-    def get_prompts(query: Optional[str] = None, tag: str = "all", limit: Optional[int] = None, offset: int = 0) -> List[Dict[str, Any]]:
+    def get_prompts(query: Optional[str] = None, tag: str = "all", category: Optional[str] = "character", limit: Optional[int] = None, offset: int = 0) -> List[Dict[str, Any]]:
         with get_db() as conn:
             cursor = conn.cursor()
             
@@ -21,28 +22,57 @@ class PromptRepository:
                     p.raw_content,
                     p.prompt_code,
                     p.parsed_json,
+                    p.category,
+                    p.note,
                     p.created_at,
-                    (SELECT COUNT(*) FROM images img WHERE img.prompt_id = p.id) as image_count
+                    (SELECT COUNT(*) FROM images img WHERE img.prompt_id = p.id) as image_count,
+                    (SELECT COUNT(*) FROM sample_contents sc WHERE sc.prompt_id = p.id) as sample_count
                 FROM prompts p
                 WHERE 1=1
             """
             params = []
 
+            # Category filter
+            if category:
+                sql += " AND p.category = ?"
+                params.append(category)
+
             # Tag filters
             if tag == "has_img":
                 sql += " AND (SELECT COUNT(*) FROM images img WHERE img.prompt_id = p.id) > 0"
+            elif tag == "no_img":
+                sql += " AND (SELECT COUNT(*) FROM images img WHERE img.prompt_id = p.id) = 0"
+            elif tag == "has_sample":
+                sql += " AND (SELECT COUNT(*) FROM sample_contents sc WHERE sc.prompt_id = p.id) > 0"
             elif tag == "storyboard":
                 sql += " AND (LOWER(p.title) LIKE '%storyboard%' OR LOWER(p.title) LIKE '%12 ô%' OR LOWER(p.title) LIKE '%12 khung%' OR LOWER(p.raw_content) LIKE '%storyboard%')"
             elif tag == "portrait":
                 sql += " AND (LOWER(p.title) LIKE '%chân dung%' OR LOWER(p.title) LIKE '%gương mặt%' OR LOWER(p.title) LIKE '%gương mat%' OR LOWER(p.raw_content) LIKE '%portrait%' OR LOWER(p.raw_content) LIKE '%close-up%')"
             elif tag == "video":
                 sql += " AND (LOWER(p.title) LIKE '%video%' OR LOWER(p.title) LIKE '%koc%' OR LOWER(p.raw_content) LIKE '%video%' OR LOWER(p.raw_content) LIKE '%scene 1%')"
+            elif tag == "seo":
+                sql += " AND (LOWER(p.title) LIKE '%seo%' OR LOWER(p.note) LIKE '%seo%' OR LOWER(p.raw_content) LIKE '%seo%')"
+            elif tag == "live":
+                sql += " AND (LOWER(p.title) LIKE '%live%' OR LOWER(p.note) LIKE '%live%' OR LOWER(p.raw_content) LIKE '%live%')"
+            elif tag == "json":
+                sql += " AND (p.prompt_type = 'json' OR p.parsed_json IS NOT NULL)"
+            elif tag == "text":
+                sql += " AND (p.prompt_type != 'json' OR p.parsed_json IS NULL)"
+            elif tag and tag != "all":
+                sql += " AND EXISTS (SELECT 1 FROM prompt_tags pt WHERE pt.prompt_id = p.id AND LOWER(pt.tag) = LOWER(?))"
+                params.append(tag)
 
-            # Search query
+            # Search query (matches title, content, note, id, tags)
             if query and query.strip():
                 q_term = f"%{query.strip().lower()}%"
-                sql += " AND (LOWER(p.title) LIKE ? OR LOWER(p.raw_content) LIKE ? OR LOWER(p.id) LIKE ?)"
-                params.extend([q_term, q_term, q_term])
+                sql += """ AND (
+                    LOWER(p.title) LIKE ? 
+                    OR LOWER(p.raw_content) LIKE ? 
+                    OR LOWER(p.id) LIKE ? 
+                    OR LOWER(COALESCE(p.note, '')) LIKE ?
+                    OR EXISTS (SELECT 1 FROM prompt_tags pt WHERE pt.prompt_id = p.id AND LOWER(pt.tag) LIKE ?)
+                )"""
+                params.extend([q_term, q_term, q_term, q_term, q_term])
 
             sql += " ORDER BY p.original_index ASC"
 
@@ -53,7 +83,7 @@ class PromptRepository:
             cursor.execute(sql, params)
             prompts = cursor.fetchall()
 
-            # Attach images list summary for each prompt in list view
+            # Attach images and tags list summary for each prompt in list view
             prompt_ids = [p["id"] for p in prompts]
             if prompt_ids:
                 placeholders = ",".join("?" for _ in prompt_ids)
@@ -67,12 +97,25 @@ class PromptRepository:
                 img_map = {}
                 for r in img_rows:
                     img_map.setdefault(r["prompt_id"], []).append(r)
-                
+
+                cursor.execute(f"""
+                    SELECT prompt_id, tag
+                    FROM prompt_tags
+                    WHERE prompt_id IN ({placeholders})
+                    ORDER BY id ASC
+                """, prompt_ids)
+                tag_rows = cursor.fetchall()
+                tag_map = {}
+                for r in tag_rows:
+                    tag_map.setdefault(r["prompt_id"], []).append(r["tag"])
+
                 for p in prompts:
                     p["images"] = img_map.get(p["id"], [])
+                    p["tags"] = tag_map.get(p["id"], [])
             else:
                 for p in prompts:
                     p["images"] = []
+                    p["tags"] = []
 
             return prompts
 
@@ -81,7 +124,7 @@ class PromptRepository:
         with get_db() as conn:
             cursor = conn.cursor()
             cursor.execute("""
-                SELECT id, original_index, title, raw_title, prompt_type, raw_content, prompt_code, parsed_json, created_at
+                SELECT id, original_index, title, raw_title, prompt_type, raw_content, prompt_code, parsed_json, category, note, created_at
                 FROM prompts
                 WHERE id = ?
             """, (prompt_id,))
@@ -105,9 +148,18 @@ class PromptRepository:
             """, (prompt_id,))
             prompt["images"] = cursor.fetchall()
 
+            # Fetch sample contents
+            cursor.execute("""
+                SELECT id, prompt_id, content, title, created_at
+                FROM sample_contents
+                WHERE prompt_id = ?
+                ORDER BY id ASC
+            """, (prompt_id,))
+            prompt["sample_contents"] = cursor.fetchall()
+
             # Fetch fields
             cursor.execute("""
-                SELECT id, prompt_id, field_path as path, field_key as key, label, field_value as value, field_type as type, is_list
+                SELECT id, prompt_id, field_path as path, field_key as key, label, field_value as value, field_type as type, is_list, is_primary
                 FROM prompt_fields
                 WHERE prompt_id = ?
                 ORDER BY id ASC
@@ -115,7 +167,20 @@ class PromptRepository:
             fields = cursor.fetchall()
             for f in fields:
                 f["is_list"] = bool(f.get("is_list", 0))
+                f["is_primary"] = bool(f.get("is_primary", 0))
+                current_lbl = str(f.get("label") or "").strip()
+                if not current_lbl or "." in current_lbl:
+                    f["label"] = format_field_label(f.get("key") or f.get("path"), f.get("path"))
             prompt["fields"] = fields
+
+            # Fetch tags
+            cursor.execute("""
+                SELECT tag
+                FROM prompt_tags
+                WHERE prompt_id = ?
+                ORDER BY id ASC
+            """, (prompt_id,))
+            prompt["tags"] = [r["tag"] for r in cursor.fetchall()]
 
             return prompt
 
@@ -133,13 +198,20 @@ class PromptRepository:
                 WHERE id = ?
             """, (parsed_json_str, prompt_code, prompt_id))
 
+            # Fetch category
+            cursor.execute("SELECT category FROM prompts WHERE id = ?", (prompt_id,))
+            p_row = cursor.fetchone()
+            cat = p_row["category"] if p_row else "character"
+
             # Delete old fields and insert new ones
             cursor.execute("DELETE FROM prompt_fields WHERE prompt_id = ?", (prompt_id,))
             new_fields = extract_flat_fields(parsed_json)
+            new_fields = detect_primary_fields(new_fields, category=cat)
+
             for f in new_fields:
                 cursor.execute("""
-                    INSERT INTO prompt_fields (prompt_id, field_path, field_key, label, field_value, field_type, is_list)
-                    VALUES (?, ?, ?, ?, ?, ?, ?)
+                    INSERT INTO prompt_fields (prompt_id, field_path, field_key, label, field_value, field_type, is_list, is_primary)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                 """, (
                     prompt_id,
                     f.get("path", ""),
@@ -147,7 +219,8 @@ class PromptRepository:
                     f.get("label", ""),
                     str(f.get("value", "")),
                     f.get("type", "text"),
-                    1 if f.get("is_list") else 0
+                    1 if f.get("is_list") else 0,
+                    1 if f.get("is_primary") else 0
                 ))
             conn.commit()
             return True
@@ -252,11 +325,14 @@ class PromptRepository:
             prompt_code = parsed_data.get("prompt_code", raw_content)
             parsed_json_str = json.dumps(parsed_data.get("parsed_json"), ensure_ascii=False) if parsed_data.get("parsed_json") else None
 
+            category = parsed_data.get("category", "character")
+            note = parsed_data.get("note", "")
+
             # Insert prompt
             cursor.execute("""
-                INSERT INTO prompts (id, original_index, title, raw_title, prompt_type, raw_content, prompt_code, parsed_json)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-            """, (new_id, new_idx, title, raw_title, prompt_type, raw_content, prompt_code, parsed_json_str))
+                INSERT INTO prompts (id, original_index, title, raw_title, prompt_type, raw_content, prompt_code, parsed_json, category, note)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, (new_id, new_idx, title, raw_title, prompt_type, raw_content, prompt_code, parsed_json_str, category, note))
 
             # Insert images
             import base64
@@ -300,11 +376,20 @@ class PromptRepository:
                             VALUES (?, ?, ?, ?, 'pending', 0)
                         """, (new_id, img_item_clean, local_path, filename))
 
-            # Insert fields
-            for f in parsed_data.get("fields", []):
+            # Insert sample content if provided
+            sample_content = parsed_data.get("sample_content", "")
+            if sample_content and str(sample_content).strip():
                 cursor.execute("""
-                    INSERT INTO prompt_fields (prompt_id, field_path, field_key, label, field_value, field_type, is_list)
-                    VALUES (?, ?, ?, ?, ?, ?, ?)
+                    INSERT INTO sample_contents (prompt_id, content, title)
+                    VALUES (?, ?, ?)
+                """, (new_id, str(sample_content).strip(), "Content mẫu #1"))
+
+            # Insert fields
+            for idx, f in enumerate(parsed_data.get("fields", [])):
+                is_pri = 1 if f.get("is_primary") or idx < 3 else 0
+                cursor.execute("""
+                    INSERT INTO prompt_fields (prompt_id, field_path, field_key, label, field_value, field_type, is_list, is_primary)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                 """, (
                     new_id,
                     f.get("path", ""),
@@ -312,12 +397,60 @@ class PromptRepository:
                     f.get("label", ""),
                     str(f.get("value", "")),
                     f.get("type", "text"),
-                    1 if f.get("is_list") else 0
+                    1 if f.get("is_list") else 0,
+                    is_pri
                 ))
 
             conn.commit()
 
         return PromptRepository.get_prompt_by_id(new_id)
+
+    @staticmethod
+    def update_field_primary(prompt_id: str, field_id: int, is_primary: bool) -> bool:
+        with get_db() as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                UPDATE prompt_fields 
+                SET is_primary = ?
+                WHERE id = ? AND prompt_id = ?
+            """, (1 if is_primary else 0, field_id, prompt_id))
+            conn.commit()
+            return cursor.rowcount > 0
+
+    @staticmethod
+    def add_sample_content(prompt_id: str, content: str, title: str = "") -> Optional[Dict[str, Any]]:
+        clean_content = (content or "").strip()
+        if not clean_content:
+            return None
+        with get_db() as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT COUNT(*) as cnt FROM sample_contents WHERE prompt_id = ?", (prompt_id,))
+            cnt = cursor.fetchone()["cnt"]
+            sample_title = title.strip() or f"Content mẫu #{cnt + 1}"
+            cursor.execute("""
+                INSERT INTO sample_contents (prompt_id, content, title)
+                VALUES (?, ?, ?)
+            """, (prompt_id, clean_content, sample_title))
+            content_id = cursor.lastrowid
+            conn.commit()
+            cursor.execute("SELECT id, prompt_id, content, title, created_at FROM sample_contents WHERE id = ?", (content_id,))
+            return cursor.fetchone()
+
+    @staticmethod
+    def delete_sample_content(prompt_id: str, content_id: int) -> bool:
+        with get_db() as conn:
+            cursor = conn.cursor()
+            cursor.execute("DELETE FROM sample_contents WHERE id = ? AND prompt_id = ?", (content_id, prompt_id))
+            conn.commit()
+            return cursor.rowcount > 0
+
+    @staticmethod
+    def update_prompt_note(prompt_id: str, note: str) -> bool:
+        with get_db() as conn:
+            cursor = conn.cursor()
+            cursor.execute("UPDATE prompts SET note = ? WHERE id = ?", ((note or "").strip(), prompt_id))
+            conn.commit()
+            return cursor.rowcount > 0
 
     @staticmethod
     def add_image_to_prompt(prompt_id: str, filename: str, local_path: str, url: str = "", file_size: int = 0, status: str = "downloaded") -> bool:
@@ -456,18 +589,25 @@ class PromptRepository:
             cursor.execute("DELETE FROM prompt_fields WHERE prompt_id = ?", (prompt_id,))
 
             target_fields = fields
+            cursor.execute("SELECT category FROM prompts WHERE id = ?", (prompt_id,))
+            p_row = cursor.fetchone()
+            cat = p_row["category"] if p_row else "character"
+
             if target_fields is None and parsed_json:
                 target_fields = extract_flat_fields(parsed_json)
+                target_fields = detect_primary_fields(target_fields, category=cat)
             elif target_fields is None:
                 target_fields = [
-                    {"path": "title", "key": "title", "label": "Tiêu đề", "value": title, "type": "text", "is_list": False},
-                    {"path": "prompt_content", "key": "prompt_content", "label": "Nội dung câu lệnh", "value": prompt_code, "type": "textarea", "is_list": False}
+                    {"path": "title", "key": "title", "label": "Tiêu đề", "value": title, "type": "text", "is_list": False, "is_primary": True},
+                    {"path": "prompt_content", "key": "prompt_content", "label": "Nội dung câu lệnh", "value": prompt_code, "type": "textarea", "is_list": False, "is_primary": True}
                 ]
+            else:
+                target_fields = detect_primary_fields(target_fields, category=cat)
 
             for f in target_fields:
                 cursor.execute("""
-                    INSERT INTO prompt_fields (prompt_id, field_path, field_key, label, field_value, field_type, is_list)
-                    VALUES (?, ?, ?, ?, ?, ?, ?)
+                    INSERT INTO prompt_fields (prompt_id, field_path, field_key, label, field_value, field_type, is_list, is_primary)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                 """, (
                     prompt_id,
                     f.get("path", ""),
@@ -475,7 +615,8 @@ class PromptRepository:
                     f.get("label", ""),
                     str(f.get("value", "")),
                     f.get("type", "text"),
-                    1 if f.get("is_list") else 0
+                    1 if f.get("is_list") else 0,
+                    1 if f.get("is_primary") else 0
                 ))
 
             conn.commit()
@@ -540,18 +681,25 @@ class PromptRepository:
 
             # Insert fields
             target_fields = fields
+            cursor.execute("SELECT category FROM prompts WHERE id = ?", (new_id,))
+            p_row = cursor.fetchone()
+            cat = p_row["category"] if p_row else "character"
+
             if target_fields is None and parsed_json:
                 target_fields = extract_flat_fields(parsed_json)
+                target_fields = detect_primary_fields(target_fields, category=cat)
             elif target_fields is None:
                 target_fields = [
-                    {"path": "title", "key": "title", "label": "Tiêu đề", "value": title, "type": "text", "is_list": False},
-                    {"path": "prompt_content", "key": "prompt_content", "label": "Nội dung câu lệnh", "value": prompt_code, "type": "textarea", "is_list": False}
+                    {"path": "title", "key": "title", "label": "Tiêu đề", "value": title, "type": "text", "is_list": False, "is_primary": True},
+                    {"path": "prompt_content", "key": "prompt_content", "label": "Nội dung câu lệnh", "value": prompt_code, "type": "textarea", "is_list": False, "is_primary": True}
                 ]
+            else:
+                target_fields = detect_primary_fields(target_fields, category=cat)
 
             for f in target_fields:
                 cursor.execute("""
-                    INSERT INTO prompt_fields (prompt_id, field_path, field_key, label, field_value, field_type, is_list)
-                    VALUES (?, ?, ?, ?, ?, ?, ?)
+                    INSERT INTO prompt_fields (prompt_id, field_path, field_key, label, field_value, field_type, is_list, is_primary)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                 """, (
                     new_id,
                     f.get("path", ""),
@@ -559,10 +707,80 @@ class PromptRepository:
                     f.get("label", ""),
                     str(f.get("value", "")),
                     f.get("type", "text"),
-                    1 if f.get("is_list") else 0
+                    1 if f.get("is_list") else 0,
+                    1 if f.get("is_primary") else 0
                 ))
 
             conn.commit()
 
         return PromptRepository.get_prompt_by_id(new_id)
+
+    @staticmethod
+    def get_tags(query: Optional[str] = None, limit: int = 25) -> List[Dict[str, Any]]:
+        with get_db() as conn:
+            cursor = conn.cursor()
+            if query and query.strip():
+                clean_q = query.strip().lstrip('#').strip().lower()
+                cursor.execute("""
+                    SELECT tag, COUNT(*) as count
+                    FROM prompt_tags
+                    WHERE LOWER(tag) LIKE ?
+                    GROUP BY tag
+                    ORDER BY count DESC, tag ASC
+                    LIMIT ?
+                """, (f"%{clean_q}%", limit))
+            else:
+                cursor.execute("""
+                    SELECT tag, COUNT(*) as count
+                    FROM prompt_tags
+                    GROUP BY tag
+                    ORDER BY count DESC, tag ASC
+                    LIMIT ?
+                """, (limit,))
+            return cursor.fetchall()
+
+    @staticmethod
+    def get_prompt_tags(prompt_id: str) -> List[str]:
+        with get_db() as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT tag
+                FROM prompt_tags
+                WHERE prompt_id = ?
+                ORDER BY id ASC
+            """, (prompt_id,))
+            return [r["tag"] for r in cursor.fetchall()]
+
+    @staticmethod
+    def add_tag_to_prompt(prompt_id: str, tag: str) -> List[str]:
+        clean_tag = (tag or "").strip().lstrip('#').strip()
+        if not clean_tag or len(clean_tag) > 50:
+            return PromptRepository.get_prompt_tags(prompt_id)
+
+        with get_db() as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                INSERT OR IGNORE INTO prompt_tags (prompt_id, tag)
+                VALUES (?, ?)
+            """, (prompt_id, clean_tag))
+            conn.commit()
+
+        return PromptRepository.get_prompt_tags(prompt_id)
+
+    @staticmethod
+    def remove_tag_from_prompt(prompt_id: str, tag: str) -> List[str]:
+        clean_tag = (tag or "").strip().lstrip('#').strip()
+        if not clean_tag:
+            return PromptRepository.get_prompt_tags(prompt_id)
+
+        with get_db() as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                DELETE FROM prompt_tags
+                WHERE prompt_id = ? AND LOWER(tag) = LOWER(?)
+            """, (prompt_id, clean_tag))
+            conn.commit()
+
+        return PromptRepository.get_prompt_tags(prompt_id)
+
 

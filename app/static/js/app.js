@@ -5,13 +5,108 @@ let formState = {};
 let currentSlideIndex = 0;
 let currentTag = 'all';
 let currentTab = 'featured';
+let currentNavTab = 'character'; // 'character' | 'content'
+let currentSampleContentIndex = 0;
+let usePromptProvider = 'openai';
 let searchDebounceTimer = null;
+let tagAutocompleteDebounce = null;
+let activeDropdownIndex = -1;
+let currentAutocompleteItems = [];
+let tagRequestSeq = 0;
 
-// Initialize app on DOM ready
+// ==========================================
+// Browser Router Functions (HTML5 History API - No '#')
+// ==========================================
+
+function parseCurrentRoute() {
+    const pathname = window.location.pathname.replace(/\/+$/, '');
+    const parts = pathname.split('/').filter(Boolean);
+
+    let tab = null;
+    let promptId = null;
+
+    // 1. Check pathname: /character, /content, /character/:id, /content/:id
+    if (parts.length > 0 && (parts[0] === 'character' || parts[0] === 'content')) {
+        tab = parts[0];
+        if (parts.length > 1 && parts[1]) {
+            promptId = decodeURIComponent(parts[1]);
+        }
+    }
+
+    // 2. Check fallback hash (if user had old hash URL e.g. #content_100, #/content/100)
+    if (!tab && window.location.hash) {
+        const rawHash = window.location.hash.replace(/^#\/?/, '').trim();
+        const hashParts = rawHash.split('/').filter(Boolean);
+        if (hashParts.length > 0) {
+            if (hashParts[0] === 'character' || hashParts[0] === 'content') {
+                tab = hashParts[0];
+                if (hashParts[1]) promptId = decodeURIComponent(hashParts[1]);
+            } else if (rawHash.startsWith('content_')) {
+                tab = 'content';
+                promptId = rawHash;
+            } else if (rawHash.startsWith('prompt_')) {
+                tab = 'character';
+                promptId = rawHash;
+            }
+        }
+    }
+
+    // 3. Fallback to localStorage if no route was in the URL bar
+    if (!tab) {
+        const savedTab = localStorage.getItem('last_active_tab');
+        if (savedTab === 'character' || savedTab === 'content') {
+            tab = savedTab;
+            promptId = localStorage.getItem('last_active_prompt_' + tab) || null;
+        }
+    }
+
+    // 4. Default fallback
+    if (!tab) {
+        tab = 'character';
+    }
+
+    return { tab, promptId };
+}
+
+function updateBrowserRoute(tab, promptId = null, replace = true) {
+    if (!tab) tab = currentNavTab || 'character';
+    const targetPath = promptId ? `/${tab}/${encodeURIComponent(promptId)}` : `/${tab}`;
+
+    if (window.location.pathname !== targetPath || window.location.hash) {
+        try {
+            if (replace) {
+                history.replaceState({ tab, promptId }, '', targetPath);
+            } else {
+                history.pushState({ tab, promptId }, '', targetPath);
+            }
+        } catch (e) {
+            console.warn('History router error:', e);
+        }
+    }
+
+    // Persist to localStorage for F5 & tab restore
+    try {
+        localStorage.setItem('last_active_tab', tab);
+        if (promptId) {
+            localStorage.setItem('last_active_prompt_' + tab, promptId);
+        }
+    } catch (e) {}
+}
+
+// Initialize app on DOM ready with browser router
 document.addEventListener('DOMContentLoaded', () => {
     initEventListeners();
     fetchStats();
-    loadPrompts();
+
+    // Parse current route from browser URL (Clean path, NO '#')
+    const route = parseCurrentRoute();
+    if (route.tab !== currentNavTab) {
+        switchNavTab(route.tab, route.promptId, false);
+        updateBrowserRoute(route.tab, route.promptId, true);
+    } else {
+        updateBrowserRoute(currentNavTab, route.promptId, true);
+        loadPrompts(route.promptId);
+    }
 });
 
 function initEventListeners() {
@@ -119,6 +214,8 @@ function initEventListeners() {
             closeGenerateImageModal();
             closeImproveModal();
             closeAddMediaModal();
+            closeUsePromptModal();
+            closeAddSampleModal();
         } else if (isLightboxOpen) {
             if (e.key === '+' || e.key === '=' || e.code === 'NumpadAdd') {
                 e.preventDefault();
@@ -214,11 +311,70 @@ function initEventListeners() {
         });
     }
 
-    // URL Hash deep linking support
-    window.addEventListener('hashchange', () => {
-        const hashId = window.location.hash.replace(/^#/, '').trim();
-        if (hashId && hashId !== currentPromptId) {
-            selectPrompt(hashId, false);
+    // Tag input events (Select2-style with Autocomplete)
+    const tagInput = document.getElementById('tagInput');
+    if (tagInput) {
+        tagInput.addEventListener('input', (e) => {
+            clearTimeout(tagAutocompleteDebounce);
+            const val = e.target.value;
+            tagAutocompleteDebounce = setTimeout(() => {
+                fetchTagSuggestions(val);
+            }, 150);
+        });
+
+        tagInput.addEventListener('focus', () => {
+            fetchTagSuggestions(tagInput.value);
+        });
+
+        tagInput.addEventListener('keydown', (e) => {
+            const dropdown = document.getElementById('tagAutocompleteDropdown');
+            const isDropdownOpen = dropdown && !dropdown.classList.contains('hidden');
+
+            if (e.key === 'Enter' || e.key === ',') {
+                e.preventDefault();
+                if (isDropdownOpen && activeDropdownIndex >= 0 && currentAutocompleteItems[activeDropdownIndex]) {
+                    addPromptTag(currentAutocompleteItems[activeDropdownIndex].tag);
+                } else if (tagInput.value.trim()) {
+                    addPromptTag(tagInput.value.trim());
+                }
+            } else if (e.key === 'Backspace') {
+                if (!tagInput.value && currentPromptDetail && currentPromptDetail.tags && currentPromptDetail.tags.length > 0) {
+                    const lastTag = currentPromptDetail.tags[currentPromptDetail.tags.length - 1];
+                    removePromptTag(lastTag);
+                }
+            } else if (e.key === 'ArrowDown') {
+                if (isDropdownOpen && currentAutocompleteItems.length > 0) {
+                    e.preventDefault();
+                    activeDropdownIndex = (activeDropdownIndex + 1) % currentAutocompleteItems.length;
+                    highlightDropdownItem(activeDropdownIndex);
+                }
+            } else if (e.key === 'ArrowUp') {
+                if (isDropdownOpen && currentAutocompleteItems.length > 0) {
+                    e.preventDefault();
+                    activeDropdownIndex = (activeDropdownIndex - 1 + currentAutocompleteItems.length) % currentAutocompleteItems.length;
+                    highlightDropdownItem(activeDropdownIndex);
+                }
+            } else if (e.key === 'Escape') {
+                closeTagAutocomplete();
+            }
+        });
+
+        // Close dropdown when clicking outside
+        document.addEventListener('click', (e) => {
+            const wrapper = document.getElementById('select2TagsWrapper');
+            if (wrapper && !wrapper.contains(e.target)) {
+                closeTagAutocomplete();
+            }
+        });
+    }
+
+    // Browser router popstate listener (Back / Forward buttons, URL path changes)
+    window.addEventListener('popstate', (event) => {
+        const route = parseCurrentRoute();
+        if (route.tab !== currentNavTab) {
+            switchNavTab(route.tab, route.promptId, false);
+        } else if (route.promptId && route.promptId !== currentPromptId) {
+            selectPrompt(route.promptId, false);
         }
     });
 }
@@ -245,6 +401,7 @@ async function loadPrompts(selectedIdToKeep = null) {
     const url = new URL('/api/prompts', window.location.origin);
     if (q) url.searchParams.set('q', q);
     if (currentTag && currentTag !== 'all') url.searchParams.set('tag', currentTag);
+    url.searchParams.set('category', currentNavTab);
 
     const listEl = document.getElementById('promptList');
     listEl.innerHTML = `
@@ -268,15 +425,21 @@ async function loadPrompts(selectedIdToKeep = null) {
             displayCountText.innerText = `Hiển thị ${currentPromptsList.length} câu lệnh`;
         }
 
-        const hashId = window.location.hash.replace(/^#/, '').trim();
         let targetId = null;
-
-        if (selectedIdToKeep) {
+        if (selectedIdToKeep && currentPromptsList.some(p => p.id === selectedIdToKeep)) {
             targetId = selectedIdToKeep;
-        } else if (hashId) {
-            targetId = hashId;
-        } else if (currentPromptsList.length > 0) {
-            targetId = currentPromptsList[0].id;
+        } else {
+            const route = parseCurrentRoute();
+            if (route.tab === currentNavTab && route.promptId && currentPromptsList.some(p => p.id === route.promptId)) {
+                targetId = route.promptId;
+            } else {
+                const savedPrompt = localStorage.getItem('last_active_prompt_' + currentNavTab);
+                if (savedPrompt && currentPromptsList.some(p => p.id === savedPrompt)) {
+                    targetId = savedPrompt;
+                } else if (currentPromptsList.length > 0) {
+                    targetId = currentPromptsList[0].id;
+                }
+            }
         }
 
         if (targetId) {
@@ -310,6 +473,9 @@ function renderPromptList(items) {
     listEl.innerHTML = items.map((item, idx) => {
         const isJson = item.prompt_type === 'json' || item.parsed_json;
         const imgCount = item.image_count || (item.images ? item.images.length : 0);
+        const sampleCount = item.sample_count || 0;
+        const note = item.note || '';
+
         return `
             <div onclick="selectPrompt('${item.id}')" id="prompt-card-${item.id}"
                  class="prompt-card group p-3 rounded-xl cursor-pointer transition-all duration-200 hover:bg-dark-700/70 border border-transparent hover:border-dark-600">
@@ -317,12 +483,20 @@ function renderPromptList(items) {
                     <span class="text-[11px] font-mono font-semibold px-2 py-0.5 rounded bg-dark-900 text-slate-400 border border-dark-700 group-hover:border-slate-600">
                         #${idx + 1}
                     </span>
-                    <div class="flex items-center gap-1.5">
-                        ${imgCount > 0 ? `
-                            <span class="text-[10px] px-1.5 py-0.5 rounded bg-dark-900/90 text-amber-400/90 border border-amber-500/20 flex items-center gap-1">
-                                <i class="fa-solid fa-image text-[9px]"></i> ${imgCount}
-                            </span>
-                        ` : ''}
+                    <div class="flex items-center gap-1.5 flex-wrap justify-end">
+                        ${currentNavTab === 'content' ? `
+                            ${sampleCount > 0 ? `
+                                <span class="text-[10px] px-1.5 py-0.5 rounded bg-dark-900/90 text-cyan-400 border border-cyan-500/20 flex items-center gap-1 font-mono">
+                                    <i class="fa-solid fa-file-lines text-[9px]"></i> ${sampleCount} Mẫu
+                                </span>
+                            ` : ''}
+                        ` : `
+                            ${imgCount > 0 ? `
+                                <span class="text-[10px] px-1.5 py-0.5 rounded bg-dark-900/90 text-amber-400/90 border border-amber-500/20 flex items-center gap-1 font-mono">
+                                    <i class="fa-solid fa-image text-[9px]"></i> ${imgCount}
+                                </span>
+                            ` : ''}
+                        `}
                         <span class="text-[10px] px-1.5 py-0.5 rounded font-medium ${isJson ? 'bg-indigo-500/10 text-indigo-400 border border-indigo-500/20' : 'bg-slate-700/50 text-slate-300'}">
                             ${isJson ? 'JSON' : 'TEXT'}
                         </span>
@@ -331,6 +505,18 @@ function renderPromptList(items) {
                 <h4 class="text-xs font-medium text-slate-200 group-hover:text-white line-clamp-2 leading-relaxed">
                     ${escapeHtml(item.title)}
                 </h4>
+                ${note ? `
+                    <p class="text-[11px] text-slate-400 mt-1 line-clamp-2 leading-tight flex items-start gap-1">
+                        <i class="fa-solid fa-note-sticky text-amber-400/80 text-[10px] mt-0.5 flex-shrink-0"></i>
+                        <span>${escapeHtml(note)}</span>
+                    </p>
+                ` : ''}
+                ${item.tags && item.tags.length > 0 ? `
+                    <div class="sidebar-card-tags flex items-center gap-1 flex-wrap mt-1.5 pt-1 border-t border-dark-750/50">
+                        ${item.tags.slice(0, 3).map(t => `<span class="text-[9px] font-mono px-1.5 py-0.2 rounded bg-dark-900/80 text-brand-400 border border-brand-500/20">#${escapeHtml(t)}</span>`).join('')}
+                        ${item.tags.length > 3 ? `<span class="text-[9px] font-mono text-slate-500">+${item.tags.length - 3}</span>` : ''}
+                    </div>
+                ` : ''}
             </div>
         `;
     }).join('');
@@ -380,13 +566,13 @@ function hideDetailLoading(minDuration = 120) {
     }, remaining);
 }
 
-async function selectPrompt(promptId, updateHash = true) {
+async function selectPrompt(promptId, updateRoute = true) {
     if (!promptId) return;
     currentPromptId = promptId;
 
-    // Update browser URL Hash for direct linking
-    if (updateHash && window.location.hash !== '#' + promptId) {
-        history.replaceState(null, '', '#' + promptId);
+    // Update browser URL (clean path, NO '#')
+    if (updateRoute) {
+        updateBrowserRoute(currentNavTab, promptId, true);
     }
 
     // Highlight active in sidebar and scroll card into view
@@ -427,11 +613,7 @@ function renderDetail(prompt) {
     if (!prompt) return;
 
     // Header info
-    document.getElementById('currentPromptIdBadge').innerText = (prompt.id || 'PROMPT').toUpperCase();
     const isJson = prompt.prompt_type === 'json' || prompt.parsed_json;
-    const typeBadge = document.getElementById('currentPromptTypeBadge');
-    typeBadge.innerText = isJson ? 'JSON Structured' : 'Text Structured';
-    typeBadge.className = `px-2 py-0.5 rounded text-xs font-semibold border ${isJson ? 'bg-indigo-500/20 text-indigo-400 border-indigo-500/30' : 'bg-slate-700/50 text-slate-300 border-slate-600'}`;
 
     // Show AI convert button if prompt is raw text
     const convertBtn = document.getElementById('convertJsonBtn');
@@ -444,20 +626,49 @@ function renderDetail(prompt) {
     }
 
     const images = prompt.images || [];
-    document.getElementById('imgCountText').innerText = `${images.length} Ảnh`;
+    const isContent = currentNavTab === 'content' || prompt.category === 'content';
+    const samples = prompt.sample_contents || [];
+
     document.getElementById('currentPromptTitle').innerText = prompt.title || 'Không có tiêu đề';
+
+    // Render Select2-style Tags
+    renderPromptTags(prompt.tags || []);
+    closeTagAutocomplete();
+    const tagInputEl = document.getElementById('tagInput');
+    if (tagInputEl) tagInputEl.value = '';
 
     // Initialize Form State
     formState = {};
     if (prompt.fields && prompt.fields.length > 0) {
         prompt.fields.forEach(f => {
-            formState[f.path] = f.value || '';
+            formState[f.path] = f.value !== undefined ? f.value : '';
         });
     }
 
-    // Render Image Slider
-    currentSlideIndex = 0;
-    renderSlider(images);
+    // Toggle Content vs Character view elements
+    const genImageBtn = document.getElementById('generateImageBtn');
+    const imageSliderContainer = document.getElementById('imageSliderContainer');
+    const sampleContentContainer = document.getElementById('sampleContentContainer');
+    const usePromptActionSection = document.getElementById('usePromptActionSection');
+
+    if (isContent) {
+        if (genImageBtn) genImageBtn.classList.add('hidden');
+        if (imageSliderContainer) imageSliderContainer.classList.add('hidden');
+        if (sampleContentContainer) sampleContentContainer.classList.remove('hidden');
+        if (usePromptActionSection) usePromptActionSection.classList.remove('hidden');
+
+        currentSampleContentIndex = 0;
+        renderSampleContent(samples);
+    } else {
+        if (genImageBtn) genImageBtn.classList.remove('hidden');
+        if (imageSliderContainer) imageSliderContainer.classList.remove('hidden');
+        if (sampleContentContainer) sampleContentContainer.classList.add('hidden');
+        if (usePromptActionSection) usePromptActionSection.classList.add('hidden');
+
+        // Render Image Slider
+        currentSlideIndex = 0;
+        renderSlider(images);
+    }
 
     // Render Dynamic Form
     renderDynamicForm(prompt.fields || []);
@@ -585,7 +796,12 @@ function handleThumbError(img) {
 // Render dynamic parameter form
 function renderDynamicForm(fields) {
     const formEl = document.getElementById('dynamicParamForm');
-    document.getElementById('allFieldsCount').innerText = fields.length;
+    const allCountBadge = document.getElementById('allFieldsCount');
+    const featuredCountBadge = document.getElementById('featuredFieldsCount');
+
+    const primaryFields = (fields || []).filter(f => f.is_primary);
+    if (allCountBadge) allCountBadge.innerText = (fields || []).length;
+    if (featuredCountBadge) featuredCountBadge.innerText = primaryFields.length;
 
     if (!fields || fields.length === 0) {
         formEl.innerHTML = `
@@ -598,24 +814,46 @@ function renderDynamicForm(fields) {
     }
 
     let displayedFields = fields;
-    if (currentTab === 'featured' && fields.length > 6) {
-        const featuredKeywords = ['prompt', 'subject', 'style', 'camera', 'background', 'lighting', 'clothing', 'pose', 'character', 'setting', 'positive_prompt'];
-        const matched = fields.filter(f => featuredKeywords.some(k => f.path.toLowerCase().includes(k) || f.key.toLowerCase().includes(k)));
-        displayedFields = matched.length >= 3 ? matched : fields.slice(0, 8);
+    if (currentTab === 'featured') {
+        displayedFields = primaryFields;
+        if (displayedFields.length === 0) {
+            formEl.innerHTML = `
+                <div class="p-8 text-center text-slate-400 text-xs space-y-2">
+                    <i class="fa-regular fa-star text-2xl text-amber-400/80 mb-1"></i>
+                    <p class="font-semibold text-slate-300">Chưa có thuộc tính chính nào được đánh dấu</p>
+                    <p class="text-slate-500 max-w-sm mx-auto">Chuyển sang tab <b>"Toàn bộ trường"</b> và bấm vào biểu tượng ngôi sao <i class="fa-regular fa-star text-amber-400"></i> bên cạnh trường bạn muốn hiển thị tại đây.</p>
+                    <button type="button" onclick="setFormTab('all')" class="mt-2 px-3.5 py-1.5 rounded-lg bg-dark-700 hover:bg-dark-600 text-white text-xs font-medium transition">
+                        Xem toàn bộ trường (${fields.length})
+                    </button>
+                </div>
+            `;
+            return;
+        }
     }
 
     formEl.innerHTML = displayedFields.map((field) => {
         const val = formState[field.path] !== undefined ? formState[field.path] : field.value;
         const isTextarea = field.type === 'textarea' || (val && val.length > 50);
+        const isPrimary = !!field.is_primary;
 
         return `
-            <div class="space-y-1.5 p-3 rounded-xl bg-dark-900/60 border border-dark-700/70 hover:border-dark-600 transition">
+            <div class="space-y-1.5 p-3 rounded-xl bg-dark-900/60 border ${isPrimary ? 'border-amber-500/25' : 'border-dark-700/70'} hover:border-dark-600 transition">
                 <div class="flex items-center justify-between">
-                    <label class="text-xs font-semibold text-slate-300 flex items-center gap-1.5">
-                        <i class="fa-solid fa-pen-to-square text-brand-500 text-[10px]"></i>
-                        ${escapeHtml(field.label || field.key)}
-                    </label>
-                    <span class="text-[10px] font-mono text-slate-500">${escapeHtml(field.path)}</span>
+                    <div class="flex items-center gap-1.5 min-w-0">
+                        <button type="button" onclick="toggleFieldPrimary(${field.id}, ${!isPrimary})"
+                                class="p-1 rounded hover:bg-dark-750 transition flex items-center justify-center flex-shrink-0 group/star"
+                                title="${isPrimary ? 'Bỏ thuộc tính chính' : 'Đánh dấu là thuộc tính chính'}">
+                            <i class="${isPrimary ? 'fa-solid fa-star text-amber-400 scale-110' : 'fa-regular fa-star text-slate-500 group-hover/star:text-amber-400'} text-xs transition-transform"></i>
+                        </button>
+                        <label class="text-xs font-semibold text-slate-300 flex items-center gap-1.5 truncate">
+                            <i class="fa-solid fa-pen-to-square text-brand-500 text-[10px] flex-shrink-0"></i>
+                            <span class="truncate">${escapeHtml(field.label || field.key)}</span>
+                        </label>
+                    </div>
+                    <div class="flex items-center gap-1.5">
+                        ${isPrimary ? `<span class="text-[9px] font-semibold px-1.5 py-0.5 rounded bg-amber-500/10 text-amber-400 border border-amber-500/20">Chính</span>` : ''}
+                        <span class="text-[10px] font-mono text-slate-500 truncate max-w-[130px]" title="${escapeHtml(field.path)}">${escapeHtml(field.path)}</span>
+                    </div>
                 </div>
                 ${isTextarea ? `
                     <textarea rows="3" oninput="onFieldChange('${escapeHtml(field.path)}', this.value)"
@@ -629,17 +867,49 @@ function renderDynamicForm(fields) {
     }).join('');
 }
 
+async function toggleFieldPrimary(fieldId, newStatus) {
+    if (!currentPromptId || !fieldId) return;
+    try {
+        const res = await fetch(`/api/prompts/${currentPromptId}/fields/${fieldId}/primary`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ is_primary: !!newStatus })
+        });
+        if (!res.ok) throw new Error('Không thể cập nhật thuộc tính');
+        
+        if (currentPromptDetail && currentPromptDetail.fields) {
+            const field = currentPromptDetail.fields.find(f => f.id === fieldId);
+            if (field) {
+                field.is_primary = newStatus ? 1 : 0;
+            }
+            renderDynamicForm(currentPromptDetail.fields);
+        }
+        showToast(newStatus ? 'Đã ghim vào Thuộc tính chính ⭐' : 'Đã bỏ khỏi Thuộc tính chính');
+    } catch (err) {
+        console.error('Error toggling primary:', err);
+        showToast('Lỗi khi cập nhật thuộc tính chính');
+    }
+}
+
 function setFormTab(tab) {
     currentTab = tab;
     const btnFeatured = document.getElementById('tabBtnFeatured');
     const btnAll = document.getElementById('tabBtnAll');
 
     if (tab === 'featured') {
-        btnFeatured.className = 'px-3 py-1 rounded-md bg-dark-700 text-white font-medium transition';
-        btnAll.className = 'px-3 py-1 rounded-md text-slate-400 hover:text-white transition';
+        if (btnFeatured) {
+            btnFeatured.className = 'px-3 py-1 rounded-md bg-dark-700 text-white font-medium transition flex items-center gap-1.5';
+        }
+        if (btnAll) {
+            btnAll.className = 'px-3 py-1 rounded-md text-slate-400 hover:text-white transition flex items-center gap-1.5';
+        }
     } else {
-        btnAll.className = 'px-3 py-1 rounded-md bg-dark-700 text-white font-medium transition';
-        btnFeatured.className = 'px-3 py-1 rounded-md text-slate-400 hover:text-white transition';
+        if (btnAll) {
+            btnAll.className = 'px-3 py-1 rounded-md bg-dark-700 text-white font-medium transition flex items-center gap-1.5';
+        }
+        if (btnFeatured) {
+            btnFeatured.className = 'px-3 py-1 rounded-md text-slate-400 hover:text-white transition flex items-center gap-1.5';
+        }
     }
 
     if (currentPromptDetail) {
@@ -691,7 +961,17 @@ function updatePromptCodeDisplay() {
             if (formState['prompt_content']) {
                 generatedCode = formState['prompt_content'];
             } else {
-                generatedCode = currentPromptDetail.prompt_code || currentPromptDetail.raw_content || "";
+                let text = currentPromptDetail.prompt_code || currentPromptDetail.raw_content || "";
+                if (currentPromptDetail.fields && currentPromptDetail.fields.length > 0) {
+                    for (const f of currentPromptDetail.fields) {
+                        const path = f.path;
+                        const val = formState[path];
+                        if (val !== undefined && val !== null && String(val).trim() !== '') {
+                            text = text.split(path).join(String(val).trim());
+                        }
+                    }
+                }
+                generatedCode = text;
             }
         }
     }
@@ -1042,10 +1322,26 @@ function openCreateModal() {
         setCreateMediaTab('upload');
         const mediaInput = document.getElementById('newMediaInput');
         if (mediaInput) mediaInput.value = '';
+        const noteInput = document.getElementById('newNoteInput');
+        if (noteInput) noteInput.value = '';
+        const sampleInput = document.getElementById('newSampleContentInput');
+        if (sampleInput) sampleInput.value = '';
         const promptInput = document.getElementById('newPromptInput');
         if (promptInput) {
             promptInput.value = '';
             promptInput.focus();
+        }
+
+        const charWrapper = document.getElementById('createCharacterMediaWrapper');
+        const contentWrapper = document.getElementById('createContentWrapper');
+        if (charWrapper && contentWrapper) {
+            if (currentNavTab === 'content') {
+                charWrapper.classList.add('hidden');
+                contentWrapper.classList.remove('hidden');
+            } else {
+                charWrapper.classList.remove('hidden');
+                contentWrapper.classList.add('hidden');
+            }
         }
     }
 }
@@ -1064,10 +1360,14 @@ async function submitCreatePrompt(event) {
     }
     const mediaInput = document.getElementById('newMediaInput');
     const promptInput = document.getElementById('newPromptInput');
+    const noteInput = document.getElementById('newNoteInput');
+    const sampleInput = document.getElementById('newSampleContentInput');
     const submitBtn = document.getElementById('submitCreateBtn');
 
-    const promptVal = promptInput.value.trim();
+    const promptVal = promptInput ? promptInput.value.trim() : '';
     const mediaVal = mediaInput ? mediaInput.value.trim() : '';
+    const noteVal = noteInput ? noteInput.value.trim() : '';
+    const sampleVal = sampleInput ? sampleInput.value.trim() : '';
 
     if (!promptVal) {
         showToast('Vui lòng nhập nội dung câu lệnh');
@@ -1080,14 +1380,23 @@ async function submitCreatePrompt(event) {
     try {
         const uploadedBase64List = newPromptUploadedFiles.map(f => f.dataUrl);
 
+        const payload = {
+            prompt: promptVal,
+            category: currentNavTab
+        };
+
+        if (currentNavTab === 'content') {
+            if (noteVal) payload.note = noteVal;
+            if (sampleVal) payload.sample_content = sampleVal;
+        } else {
+            payload.media = mediaVal;
+            payload.images = uploadedBase64List;
+        }
+
         const res = await fetch('/api/prompts', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                prompt: promptVal,
-                media: mediaVal,
-                images: uploadedBase64List
-            })
+            body: JSON.stringify(payload)
         });
 
         if (!res.ok) {
@@ -1099,7 +1408,9 @@ async function submitCreatePrompt(event) {
         
         // Reset form & close modal
         if (mediaInput) mediaInput.value = '';
-        promptInput.value = '';
+        if (promptInput) promptInput.value = '';
+        if (noteInput) noteInput.value = '';
+        if (sampleInput) sampleInput.value = '';
         clearAllNewPromptFiles();
         closeCreateModal();
 
@@ -1117,16 +1428,107 @@ async function submitCreatePrompt(event) {
     }
 }
 
-
-function filterByTag(tag) {
+function filterByTag(tag, evt) {
     currentTag = tag;
     document.querySelectorAll('.tag-btn').forEach(btn => {
         btn.className = 'tag-btn px-2.5 py-1 rounded-md bg-dark-700 hover:bg-dark-600 text-slate-300 whitespace-nowrap transition';
     });
-    if (event && event.currentTarget) {
-        event.currentTarget.className = 'tag-btn active px-2.5 py-1 rounded-md bg-brand-600 text-white font-medium whitespace-nowrap transition';
+    const target = evt ? evt.currentTarget : (event ? event.currentTarget : null);
+    if (target) {
+        target.className = 'tag-btn active px-2.5 py-1 rounded-md bg-brand-600 text-white font-medium whitespace-nowrap transition';
     }
     loadPrompts();
+}
+
+function switchNavTab(tab, targetPromptId = null, updateRoute = true) {
+    currentNavTab = tab;
+
+    const btnChar = document.getElementById('navTabCharacter');
+    const btnContent = document.getElementById('navTabContent');
+
+    if (tab === 'character') {
+        if (btnChar) {
+            btnChar.className = 'px-3.5 py-1.5 rounded-lg text-xs font-semibold transition-all duration-200 flex items-center gap-2 bg-gradient-to-r from-brand-600 to-emerald-600 text-white shadow-md shadow-brand-600/20';
+        }
+        if (btnContent) {
+            btnContent.className = 'px-3.5 py-1.5 rounded-lg text-xs font-medium transition-all duration-200 flex items-center gap-2 text-slate-400 hover:text-white hover:bg-dark-750';
+        }
+    } else {
+        if (btnContent) {
+            btnContent.className = 'px-3.5 py-1.5 rounded-lg text-xs font-semibold transition-all duration-200 flex items-center gap-2 bg-gradient-to-r from-cyan-600 to-teal-600 text-white shadow-md shadow-cyan-600/20';
+        }
+        if (btnChar) {
+            btnChar.className = 'px-3.5 py-1.5 rounded-lg text-xs font-medium transition-all duration-200 flex items-center gap-2 text-slate-400 hover:text-white hover:bg-dark-750';
+        }
+    }
+
+    // Immediate visual toggle of media vs content container
+    const genImageBtn = document.getElementById('generateImageBtn');
+    const imageSliderContainer = document.getElementById('imageSliderContainer');
+    const sampleContentContainer = document.getElementById('sampleContentContainer');
+    const usePromptActionSection = document.getElementById('usePromptActionSection');
+
+    if (tab === 'content') {
+        if (genImageBtn) genImageBtn.classList.add('hidden');
+        if (imageSliderContainer) imageSliderContainer.classList.add('hidden');
+        if (sampleContentContainer) sampleContentContainer.classList.remove('hidden');
+        if (usePromptActionSection) usePromptActionSection.classList.remove('hidden');
+    } else {
+        if (genImageBtn) genImageBtn.classList.remove('hidden');
+        if (imageSliderContainer) imageSliderContainer.classList.remove('hidden');
+        if (sampleContentContainer) sampleContentContainer.classList.add('hidden');
+        if (usePromptActionSection) usePromptActionSection.classList.add('hidden');
+    }
+
+    // Update tags filter bar
+    const tagFilters = document.getElementById('tagFilters');
+    if (tagFilters) {
+        if (tab === 'content') {
+            tagFilters.innerHTML = `
+                <button onclick="filterByTag('all', event)" class="tag-btn active px-2.5 py-1 rounded-md bg-brand-600 text-white font-medium whitespace-nowrap transition">Tất cả</button>
+                <button onclick="filterByTag('has_sample', event)" class="tag-btn px-2.5 py-1 rounded-md bg-dark-700 hover:bg-dark-600 text-slate-300 whitespace-nowrap transition">Có content mẫu</button>
+                <button onclick="filterByTag('video', event)" class="tag-btn px-2.5 py-1 rounded-md bg-dark-700 hover:bg-dark-600 text-slate-300 whitespace-nowrap transition">Kịch bản Video</button>
+                <button onclick="filterByTag('seo', event)" class="tag-btn px-2.5 py-1 rounded-md bg-dark-700 hover:bg-dark-600 text-slate-300 whitespace-nowrap transition">Bài viết SEO</button>
+                <button onclick="filterByTag('live', event)" class="tag-btn px-2.5 py-1 rounded-md bg-dark-700 hover:bg-dark-600 text-slate-300 whitespace-nowrap transition">Livestream</button>
+                <button onclick="filterByTag('json', event)" class="tag-btn px-2.5 py-1 rounded-md bg-dark-700 hover:bg-dark-600 text-slate-300 whitespace-nowrap transition">JSON</button>
+                <button onclick="filterByTag('text', event)" class="tag-btn px-2.5 py-1 rounded-md bg-dark-700 hover:bg-dark-600 text-slate-300 whitespace-nowrap transition">Văn bản</button>
+            `;
+        } else {
+            tagFilters.innerHTML = `
+                <button onclick="filterByTag('all', event)" class="tag-btn active px-2.5 py-1 rounded-md bg-brand-600 text-white font-medium whitespace-nowrap transition">Tất cả</button>
+                <button onclick="filterByTag('has_img', event)" class="tag-btn px-2.5 py-1 rounded-md bg-dark-700 hover:bg-dark-600 text-slate-300 whitespace-nowrap transition">Có ảnh mẫu</button>
+                <button onclick="filterByTag('no_img', event)" class="tag-btn px-2.5 py-1 rounded-md bg-dark-700 hover:bg-dark-600 text-slate-300 whitespace-nowrap transition">Chưa có ảnh</button>
+                <button onclick="filterByTag('storyboard', event)" class="tag-btn px-2.5 py-1 rounded-md bg-dark-700 hover:bg-dark-600 text-slate-300 whitespace-nowrap transition">Storyboard</button>
+                <button onclick="filterByTag('portrait', event)" class="tag-btn px-2.5 py-1 rounded-md bg-dark-700 hover:bg-dark-600 text-slate-300 whitespace-nowrap transition">Chân dung</button>
+                <button onclick="filterByTag('json', event)" class="tag-btn px-2.5 py-1 rounded-md bg-dark-700 hover:bg-dark-600 text-slate-300 whitespace-nowrap transition">JSON</button>
+                <button onclick="filterByTag('text', event)" class="tag-btn px-2.5 py-1 rounded-md bg-dark-700 hover:bg-dark-600 text-slate-300 whitespace-nowrap transition">Văn bản</button>
+            `;
+        }
+    }
+    currentTag = 'all';
+
+    // Search input placeholder
+    const searchInput = document.getElementById('searchInput');
+    if (searchInput) {
+        searchInput.placeholder = tab === 'content' ? 'Tìm theo nội dung, chú thích...' : 'Tìm theo tiêu đề, từ khóa...';
+        searchInput.value = '';
+    }
+
+    const clearBtn = document.getElementById('clearSearchBtn');
+    if (clearBtn) clearBtn.classList.add('hidden');
+
+    currentPromptId = null;
+    currentPromptDetail = null;
+    showDetailLoading();
+
+    // Determine prompt to restore for this tab
+    const promptToLoad = targetPromptId || localStorage.getItem('last_active_prompt_' + tab) || null;
+
+    if (updateRoute) {
+        updateBrowserRoute(tab, promptToLoad, false);
+    }
+
+    loadPrompts(promptToLoad);
 }
 
 // ==========================================
@@ -1341,6 +1743,779 @@ function renderEmptyDetail() {
     document.getElementById('promptCodeDisplay').innerText = '';
     document.getElementById('charCountBadge').innerText = '0 chars';
     renderSlider([]);
+    renderSampleContent([]);
+    renderPromptTags([]);
+    closeTagAutocomplete();
+}
+
+// ==========================================
+// Select2-style Tags Component with Autocomplete
+// ==========================================
+function focusTagInput() {
+    const input = document.getElementById('tagInput');
+    if (input) input.focus();
+}
+
+function renderPromptTags(tags) {
+    const list = document.getElementById('tagChipsList');
+    if (!list) return;
+
+    const currentTags = tags || (currentPromptDetail ? currentPromptDetail.tags : []) || [];
+
+    if (currentTags.length === 0) {
+        list.innerHTML = '';
+        return;
+    }
+
+    list.innerHTML = currentTags.map(tag => `
+        <span class="prompt-tag-chip inline-flex items-center gap-1 px-2.5 py-0.5 rounded-lg text-xs font-medium bg-brand-500/15 text-brand-300 border border-brand-500/30 group transition-all hover:bg-brand-500/25 select-none">
+            <span class="cursor-pointer hover:underline" onclick="event.stopPropagation(); filterByTagDirect('${escapeHtml(tag)}')" title="Nhấp để lọc danh sách theo #${escapeHtml(tag)}">#${escapeHtml(tag)}</span>
+            <button type="button" onclick="event.stopPropagation(); removePromptTag('${escapeHtml(tag)}')"
+                    class="tag-remove-btn text-brand-400/60 hover:text-rose-400 hover:bg-rose-500/10 transition-all p-0.5 rounded flex items-center justify-center ml-0.5"
+                    title="Gỡ tag #${escapeHtml(tag)}">
+                <i class="fa-solid fa-xmark text-[10px]"></i>
+            </button>
+        </span>
+    `).join('');
+}
+
+function filterByTagDirect(tag) {
+    const searchInput = document.getElementById('searchInput');
+    const clearBtn = document.getElementById('clearSearchBtn');
+    if (searchInput) {
+        searchInput.value = tag;
+        if (clearBtn) clearBtn.classList.remove('hidden');
+        loadPrompts();
+        showToast(`Đang lọc theo tag: #${tag}`);
+    }
+}
+
+async function fetchTagSuggestions(query) {
+    const dropdown = document.getElementById('tagAutocompleteDropdown');
+    if (!dropdown) return;
+
+    const cleanQ = (query || '').trim().replace(/^#/, '');
+    const thisSeq = ++tagRequestSeq;
+
+    try {
+        const url = `/api/tags?limit=15${cleanQ ? `&q=${encodeURIComponent(cleanQ)}` : ''}`;
+        const res = await fetch(url);
+        if (!res.ok) throw new Error('Failed to fetch tags');
+        const data = await res.json();
+        
+        // If a newer request has already been initiated, ignore stale response
+        if (thisSeq !== tagRequestSeq) return;
+
+        const tags = data.tags || [];
+
+        const existingPromptTags = (currentPromptDetail && currentPromptDetail.tags) || [];
+        const availableTags = tags.filter(t => !existingPromptTags.map(x => x.toLowerCase()).includes(t.tag.toLowerCase()));
+
+        currentAutocompleteItems = [];
+        let html = '';
+
+        if (availableTags.length > 0) {
+            html += `<div class="px-3 py-1 text-[10px] uppercase font-bold tracking-wider text-slate-500 bg-dark-850 select-none">Gợi ý tag sẵn có</div>`;
+            availableTags.forEach((t) => {
+                const itemIdx = currentAutocompleteItems.length;
+                currentAutocompleteItems.push({ type: 'existing', tag: t.tag });
+                html += `
+                    <div class="tag-option tag-autocomplete-item px-3 py-2 cursor-pointer hover:bg-dark-700/90 transition flex items-center justify-between group"
+                         data-index="${itemIdx}" onclick="event.stopPropagation(); selectAutocompleteTag('${escapeHtml(t.tag)}')">
+                        <span class="text-slate-200 group-hover:text-white font-medium flex items-center gap-1.5">
+                            <i class="fa-solid fa-tag text-[10px] text-brand-400"></i>
+                            <span>#${escapeHtml(t.tag)}</span>
+                        </span>
+                        <span class="text-[10px] font-mono text-slate-400 bg-dark-900 px-1.5 py-0.5 rounded border border-dark-700">
+                            ${t.count} câu lệnh
+                        </span>
+                    </div>
+                `;
+            });
+        }
+
+        const exactMatch = tags.some(t => t.tag.toLowerCase() === cleanQ.toLowerCase()) || 
+                           existingPromptTags.some(t => t.toLowerCase() === cleanQ.toLowerCase());
+        
+        if (cleanQ && !exactMatch) {
+            const createIndex = currentAutocompleteItems.length;
+            currentAutocompleteItems.push({ type: 'new', tag: cleanQ });
+            html += `
+                <div class="tag-option tag-autocomplete-item px-3 py-2 cursor-pointer hover:bg-brand-600/20 text-brand-400 hover:text-brand-300 font-medium transition flex items-center gap-2 border-t border-dark-700/60"
+                     data-index="${createIndex}" onclick="event.stopPropagation(); selectAutocompleteTag('${escapeHtml(cleanQ)}')">
+                    <i class="fa-solid fa-plus text-xs"></i>
+                    <span>Tạo tag mới: "<strong>#${escapeHtml(cleanQ)}</strong>"</span>
+                </div>
+            `;
+        }
+
+        if (currentAutocompleteItems.length === 0) {
+            if (cleanQ) {
+                html = `<div class="p-3 text-center text-slate-400 text-xs">Tag #${escapeHtml(cleanQ)} đã có trong câu lệnh này</div>`;
+            } else {
+                html = `<div class="p-3 text-center text-slate-500 text-xs">Gõ để tìm kiếm hoặc tạo tag mới</div>`;
+            }
+        }
+
+        dropdown.innerHTML = html;
+        dropdown.classList.remove('hidden');
+        activeDropdownIndex = -1;
+    } catch (err) {
+        console.error('Error fetching tags:', err);
+        dropdown.classList.add('hidden');
+    }
+}
+
+function highlightDropdownItem(index) {
+    const dropdown = document.getElementById('tagAutocompleteDropdown');
+    if (!dropdown) return;
+    const options = dropdown.querySelectorAll('.tag-option');
+    options.forEach((opt, idx) => {
+        if (idx === index) {
+            opt.classList.add('bg-dark-700', 'ring-1', 'ring-brand-500/50');
+            opt.scrollIntoView({ block: 'nearest' });
+        } else {
+            opt.classList.remove('bg-dark-700', 'ring-1', 'ring-brand-500/50');
+        }
+    });
+}
+
+function closeTagAutocomplete() {
+    const dropdown = document.getElementById('tagAutocompleteDropdown');
+    if (dropdown) dropdown.classList.add('hidden');
+    activeDropdownIndex = -1;
+    currentAutocompleteItems = [];
+}
+
+function selectAutocompleteTag(tag) {
+    addPromptTag(tag);
+}
+
+async function addPromptTag(tag) {
+    if (!currentPromptId) {
+        showToast('Vui lòng chọn một câu lệnh trước');
+        return;
+    }
+    const cleanTag = (tag || '').trim().replace(/^#/, '').trim();
+    if (!cleanTag) return;
+
+    const input = document.getElementById('tagInput');
+    if (input) input.value = '';
+    closeTagAutocomplete();
+
+    if (!currentPromptDetail) currentPromptDetail = {};
+    if (!currentPromptDetail.tags) currentPromptDetail.tags = [];
+
+    if (currentPromptDetail.tags.some(t => t.toLowerCase() === cleanTag.toLowerCase())) {
+        showToast(`Tag #${cleanTag} đã có trong câu lệnh`);
+        return;
+    }
+
+    // Optimistic UI update
+    currentPromptDetail.tags.push(cleanTag);
+    renderPromptTags(currentPromptDetail.tags);
+    updateSidebarPromptTags(currentPromptId, currentPromptDetail.tags);
+
+    try {
+        const res = await fetch(`/api/prompts/${currentPromptId}/tags`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ tag: cleanTag })
+        });
+        if (!res.ok) {
+            const errData = await res.json().catch(() => ({}));
+            throw new Error(errData.detail || 'Lỗi khi thêm tag');
+        }
+        const data = await res.json();
+        if (data.tags && currentPromptDetail) {
+            currentPromptDetail.tags = data.tags;
+            renderPromptTags(currentPromptDetail.tags);
+            updateSidebarPromptTags(currentPromptId, currentPromptDetail.tags);
+        }
+        showToast(`Đã thêm tag: #${cleanTag}`);
+    } catch (err) {
+        console.error('Error adding tag:', err);
+        showToast(`Lỗi: ${err.message}`);
+        // Rollback
+        if (currentPromptDetail && currentPromptDetail.tags) {
+            currentPromptDetail.tags = currentPromptDetail.tags.filter(t => t.toLowerCase() !== cleanTag.toLowerCase());
+            renderPromptTags(currentPromptDetail.tags);
+            updateSidebarPromptTags(currentPromptId, currentPromptDetail.tags);
+        }
+    }
+}
+
+async function removePromptTag(tag) {
+    if (!currentPromptId || !tag) return;
+    const cleanTag = tag.trim().replace(/^#/, '');
+
+    // Optimistic UI update
+    if (currentPromptDetail && currentPromptDetail.tags) {
+        currentPromptDetail.tags = currentPromptDetail.tags.filter(t => t.toLowerCase() !== cleanTag.toLowerCase());
+        renderPromptTags(currentPromptDetail.tags);
+        updateSidebarPromptTags(currentPromptId, currentPromptDetail.tags);
+    }
+
+    try {
+        const res = await fetch(`/api/prompts/${currentPromptId}/tags/${encodeURIComponent(cleanTag)}`, {
+            method: 'DELETE'
+        });
+        if (!res.ok) {
+            const errData = await res.json().catch(() => ({}));
+            throw new Error(errData.detail || 'Lỗi khi xóa tag');
+        }
+        const data = await res.json();
+        if (data.tags && currentPromptDetail) {
+            currentPromptDetail.tags = data.tags;
+            renderPromptTags(currentPromptDetail.tags);
+            updateSidebarPromptTags(currentPromptId, currentPromptDetail.tags);
+        }
+        showToast(`Đã gỡ tag #${cleanTag}`);
+    } catch (err) {
+        console.error('Error removing tag:', err);
+        showToast(`Lỗi: ${err.message}`);
+    }
+}
+
+function updateSidebarPromptTags(promptId, tags) {
+    const card = document.getElementById(`prompt-card-${promptId}`);
+    if (!card) return;
+
+    // Update in memory list
+    const found = currentPromptsList.find(p => p.id === promptId);
+    if (found) found.tags = [...tags];
+
+    let tagsContainer = card.querySelector('.sidebar-card-tags');
+    if (!tags || tags.length === 0) {
+        if (tagsContainer) tagsContainer.remove();
+        return;
+    }
+
+    if (!tagsContainer) {
+        tagsContainer = document.createElement('div');
+        tagsContainer.className = 'sidebar-card-tags flex items-center gap-1 flex-wrap mt-1.5 pt-1 border-t border-dark-750/50';
+        card.appendChild(tagsContainer);
+    }
+
+    tagsContainer.innerHTML = `
+        ${tags.slice(0, 3).map(t => `<span class="text-[9px] font-mono px-1.5 py-0.2 rounded bg-dark-900/80 text-brand-400 border border-brand-500/20">#${escapeHtml(t)}</span>`).join('')}
+        ${tags.length > 3 ? `<span class="text-[9px] font-mono text-slate-500">+${tags.length - 3}</span>` : ''}
+    `;
+}
+
+// ==========================================
+// Sample Content (Content Mẫu) Logic
+// ==========================================
+function renderSampleContent(sampleContents) {
+    const container = document.getElementById('sampleContentContainer');
+    if (!container) return;
+
+    const samples = sampleContents || (currentPromptDetail ? currentPromptDetail.sample_contents : []) || [];
+    const textEl = document.getElementById('sampleContentText');
+    const headerEl = document.getElementById('sampleContentHeader');
+    const toolbarEl = document.getElementById('sampleContentToolbar');
+    const placeholderEl = document.getElementById('noSampleContentPlaceholder');
+    const statsBadge = document.getElementById('sampleStatsBadge');
+    const counterBadge = document.getElementById('sampleSliderCounter');
+    const titleEl = document.getElementById('sampleContentTitle');
+    const dateEl = document.getElementById('sampleContentDate');
+    const prevBtn = document.getElementById('samplePrevBtn');
+    const nextBtn = document.getElementById('sampleNextBtn');
+    const deleteBtn = document.getElementById('btnDeleteSample');
+    const copyBtn = document.getElementById('btnCopySample');
+
+    if (!samples || samples.length === 0) {
+        if (placeholderEl) {
+            placeholderEl.classList.remove('hidden');
+            placeholderEl.classList.add('flex');
+        }
+        if (textEl) {
+            textEl.classList.add('hidden');
+            textEl.innerText = '';
+        }
+        if (headerEl) headerEl.classList.add('hidden');
+        if (statsBadge) statsBadge.innerText = '0 từ';
+        if (counterBadge) counterBadge.innerText = '0 / 0';
+        if (prevBtn) prevBtn.disabled = true;
+        if (nextBtn) nextBtn.disabled = true;
+        if (deleteBtn) deleteBtn.disabled = true;
+        if (copyBtn) copyBtn.disabled = true;
+        return;
+    }
+
+    if (placeholderEl) {
+        placeholderEl.classList.add('hidden');
+        placeholderEl.classList.remove('flex');
+    }
+    if (textEl) textEl.classList.remove('hidden');
+    if (headerEl) headerEl.classList.remove('hidden');
+    if (deleteBtn) deleteBtn.disabled = false;
+    if (copyBtn) copyBtn.disabled = false;
+
+    if (currentSampleContentIndex < 0) currentSampleContentIndex = 0;
+    if (currentSampleContentIndex >= samples.length) currentSampleContentIndex = samples.length - 1;
+
+    const currentItem = samples[currentSampleContentIndex];
+    const contentText = currentItem ? (currentItem.content || '') : '';
+
+    const words = contentText.trim() ? contentText.trim().split(/\s+/).filter(Boolean).length : 0;
+    if (statsBadge) statsBadge.innerText = `${words} từ`;
+    if (counterBadge) counterBadge.innerText = `${currentSampleContentIndex + 1} / ${samples.length}`;
+
+    if (titleEl) {
+        titleEl.innerHTML = `<i class="fa-solid fa-bookmark text-[11px]"></i> <span class="truncate">${escapeHtml(currentItem.title || `Content mẫu #${currentSampleContentIndex + 1}`)}</span>`;
+    }
+    if (dateEl) {
+        dateEl.innerText = currentItem.created_at ? new Date(currentItem.created_at).toLocaleDateString('vi-VN') : '';
+    }
+    if (textEl) {
+        textEl.innerText = contentText;
+    }
+
+    if (prevBtn) prevBtn.disabled = samples.length <= 1;
+    if (nextBtn) nextBtn.disabled = samples.length <= 1;
+}
+
+function prevSampleContent() {
+    const samples = currentPromptDetail?.sample_contents || [];
+    if (samples.length <= 1) return;
+    currentSampleContentIndex = (currentSampleContentIndex - 1 + samples.length) % samples.length;
+    renderSampleContent(samples);
+}
+
+function nextSampleContent() {
+    const samples = currentPromptDetail?.sample_contents || [];
+    if (samples.length <= 1) return;
+    currentSampleContentIndex = (currentSampleContentIndex + 1) % samples.length;
+    renderSampleContent(samples);
+}
+
+function copyCurrentSampleContent() {
+    const samples = currentPromptDetail?.sample_contents || [];
+    if (!samples.length || currentSampleContentIndex >= samples.length) {
+        showToast('Không có nội dung để sao chép');
+        return;
+    }
+    const text = samples[currentSampleContentIndex].content || '';
+    if (!text) {
+        showToast('Nội dung mẫu đang trống');
+        return;
+    }
+    navigator.clipboard.writeText(text).then(() => {
+        showToast('Đã sao chép Content mẫu vào bộ nhớ tạm!');
+    }).catch(err => {
+        console.error('Clipboard error:', err);
+        showToast('Không thể sao chép văn bản');
+    });
+}
+
+async function deleteCurrentSampleContent() {
+    const samples = currentPromptDetail?.sample_contents || [];
+    if (!samples.length || currentSampleContentIndex >= samples.length) return;
+    const currentItem = samples[currentSampleContentIndex];
+    const name = currentItem.title || `Content mẫu #${currentSampleContentIndex + 1}`;
+    if (!confirm(`Bạn có chắc chắn muốn xóa "${name}"?`)) return;
+
+    try {
+        const res = await fetch(`/api/prompts/${currentPromptId}/sample-contents/${currentItem.id}`, {
+            method: 'DELETE'
+        });
+        if (!res.ok) {
+            const err = await res.json().catch(() => ({}));
+            throw new Error(err.detail || 'Lỗi khi xóa mẫu');
+        }
+
+        // Remove from currentPromptDetail
+        samples.splice(currentSampleContentIndex, 1);
+        if (currentSampleContentIndex >= samples.length && currentSampleContentIndex > 0) {
+            currentSampleContentIndex = samples.length - 1;
+        }
+        renderSampleContent(samples);
+
+        // Update card in sidebar
+        const found = currentPromptsList.find(p => p.id === currentPromptId);
+        if (found) {
+            found.sample_count = samples.length;
+        }
+        updateSidebarSampleCount(currentPromptId, samples.length);
+
+        showToast('Đã xóa Content mẫu!');
+    } catch (err) {
+        console.error('Error deleting sample:', err);
+        showToast(`Lỗi: ${err.message}`);
+    }
+}
+
+function updateSidebarSampleCount(promptId, count) {
+    const activeCard = document.getElementById(`prompt-card-${promptId}`);
+    if (!activeCard) return;
+
+    const sampleBadge = activeCard.querySelector('span.text-cyan-400');
+    if (count > 0) {
+        if (sampleBadge) {
+            sampleBadge.innerHTML = `<i class="fa-solid fa-file-lines text-[9px]"></i> ${count} Mẫu`;
+        } else {
+            const badgeContainer = activeCard.querySelector('.flex.items-center.gap-1\\.5');
+            if (badgeContainer) {
+                const newBadge = document.createElement('span');
+                newBadge.className = 'text-[10px] px-1.5 py-0.5 rounded bg-dark-900/90 text-cyan-400 border border-cyan-500/20 flex items-center gap-1 font-mono';
+                newBadge.innerHTML = `<i class="fa-solid fa-file-lines text-[9px]"></i> ${count} Mẫu`;
+                badgeContainer.insertBefore(newBadge, badgeContainer.firstChild);
+            }
+        }
+    } else if (sampleBadge) {
+        sampleBadge.remove();
+    }
+}
+
+function openAddSampleModal() {
+    const modal = document.getElementById('addSampleContentModal');
+    if (!modal) return;
+    const titleInput = document.getElementById('manualSampleTitleInput');
+    const textInput = document.getElementById('manualSampleTextInput');
+    if (titleInput) titleInput.value = '';
+    if (textInput) textInput.value = '';
+    modal.classList.remove('hidden');
+    if (textInput) textInput.focus();
+}
+
+function closeAddSampleModal() {
+    const modal = document.getElementById('addSampleContentModal');
+    if (modal) modal.classList.add('hidden');
+}
+
+async function submitAddManualSample() {
+    if (!currentPromptId) return;
+    const title = document.getElementById('manualSampleTitleInput').value.trim();
+    const content = document.getElementById('manualSampleTextInput').value.trim();
+    if (!content) {
+        showToast('Vui lòng nhập nội dung văn bản mẫu');
+        return;
+    }
+
+    try {
+        const res = await fetch(`/api/prompts/${currentPromptId}/sample-contents`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ title: title || undefined, content })
+        });
+        if (!res.ok) {
+            const err = await res.json().catch(() => ({}));
+            throw new Error(err.detail || 'Lỗi khi lưu mẫu');
+        }
+        const resData = await res.json();
+        if (resData.prompt) {
+            currentPromptDetail = resData.prompt;
+        } else {
+            const created = resData.sample || resData;
+            if (!currentPromptDetail.sample_contents) {
+                currentPromptDetail.sample_contents = [];
+            }
+            currentPromptDetail.sample_contents.push(created);
+        }
+        currentSampleContentIndex = (currentPromptDetail.sample_contents || []).length - 1;
+
+        closeAddSampleModal();
+        renderSampleContent(currentPromptDetail.sample_contents || []);
+
+        const found = currentPromptsList.find(p => p.id === currentPromptId);
+        if (found) {
+            found.sample_count = (currentPromptDetail.sample_contents || []).length;
+        }
+        updateSidebarSampleCount(currentPromptId, (currentPromptDetail.sample_contents || []).length);
+
+        showToast('Đã thêm Content mẫu thành công!');
+    } catch (err) {
+        console.error('Error adding sample content:', err);
+        showToast(`Lỗi: ${err.message}`);
+    }
+}
+
+// ==========================================
+// "Sử dụng prompt này" Modal & AI Generation
+// ==========================================
+let usePromptTimerInterval = null;
+let usePromptStartTime = 0;
+
+function getCurrentRenderedPromptText() {
+    const codeDisplay = document.getElementById('promptCodeDisplay');
+    if (codeDisplay && codeDisplay.innerText.trim()) {
+        return codeDisplay.innerText.trim();
+    }
+    if (currentPromptDetail) {
+        return currentPromptDetail.raw_content || currentPromptDetail.prompt_code || '';
+    }
+    return '';
+}
+
+function openUsePromptModal() {
+    if (!currentPromptDetail) {
+        showToast('Vui lòng chọn một câu lệnh trước');
+        return;
+    }
+    const modal = document.getElementById('usePromptModal');
+    if (!modal) return;
+
+    // Set badge & title
+    const badge = document.getElementById('usePromptBadge');
+    if (badge) {
+        badge.innerText = `#${(currentPromptDetail.id || 'CONTENT').toUpperCase()}`;
+    }
+
+    // Populate prompt preview
+    const promptText = getCurrentRenderedPromptText();
+    const previewEl = document.getElementById('usePromptPreviewText');
+    if (previewEl) {
+        previewEl.innerText = promptText;
+    }
+
+    // Reset instruction & state
+    const extraInput = document.getElementById('usePromptExtraInput');
+    if (extraInput) extraInput.value = '';
+
+    const errBanner = document.getElementById('usePromptErrorBanner');
+    if (errBanner) errBanner.classList.add('hidden');
+
+    const loadingState = document.getElementById('usePromptLoadingState');
+    if (loadingState) loadingState.classList.add('hidden');
+
+    const resultSection = document.getElementById('usePromptResultSection');
+    if (resultSection) resultSection.classList.add('hidden');
+
+    const resultText = document.getElementById('usePromptResultText');
+    if (resultText) resultText.value = '';
+
+    const copyBtn = document.getElementById('btnCopyUsePromptResult');
+    if (copyBtn) copyBtn.disabled = true;
+
+    const saveBtn = document.getElementById('btnSaveUsePromptResult');
+    if (saveBtn) saveBtn.disabled = true;
+
+    const submitBtn = document.getElementById('btnSubmitGenerateContent');
+    if (submitBtn) submitBtn.disabled = false;
+
+    setUsePromptProvider(usePromptProvider || 'openai');
+
+    modal.classList.remove('hidden');
+}
+
+function closeUsePromptModal() {
+    const modal = document.getElementById('usePromptModal');
+    if (modal) modal.classList.add('hidden');
+    if (usePromptTimerInterval) {
+        clearInterval(usePromptTimerInterval);
+        usePromptTimerInterval = null;
+    }
+}
+
+function setUsePromptProvider(provider) {
+    usePromptProvider = provider;
+    const btnOpenAI = document.getElementById('btnUsePromptOpenAI');
+    const btnGemini = document.getElementById('btnUsePromptGemini');
+    const badge = document.getElementById('usePromptProviderBadge');
+
+    if (provider === 'gemini') {
+        if (btnGemini) {
+            btnGemini.className = 'px-3 py-1.5 rounded-lg font-medium transition flex items-center gap-1.5 bg-cyan-600 text-white shadow';
+        }
+        if (btnOpenAI) {
+            btnOpenAI.className = 'px-3 py-1.5 rounded-lg font-medium transition flex items-center gap-1.5 text-slate-400 hover:text-white';
+        }
+        if (badge) badge.innerText = 'Google Gemini';
+    } else {
+        if (btnOpenAI) {
+            btnOpenAI.className = 'px-3 py-1.5 rounded-lg font-medium transition flex items-center gap-1.5 bg-cyan-600 text-white shadow';
+        }
+        if (btnGemini) {
+            btnGemini.className = 'px-3 py-1.5 rounded-lg font-medium transition flex items-center gap-1.5 text-slate-400 hover:text-white';
+        }
+        if (badge) badge.innerText = 'Custom OpenAI';
+    }
+}
+
+let isUsePromptPreviewCollapsed = false;
+function toggleUsePromptPreview() {
+    isUsePromptPreviewCollapsed = !isUsePromptPreviewCollapsed;
+    const wrapper = document.getElementById('usePromptPreviewWrapper');
+    const textSpan = document.getElementById('toggleUsePromptText');
+    const icon = document.getElementById('toggleUsePromptIcon');
+
+    if (wrapper) {
+        if (isUsePromptPreviewCollapsed) {
+            wrapper.classList.add('hidden');
+            if (textSpan) textSpan.innerText = 'Xem chi tiết';
+            if (icon) icon.className = 'fa-solid fa-chevron-down text-[10px]';
+        } else {
+            wrapper.classList.remove('hidden');
+            if (textSpan) textSpan.innerText = 'Thu gọn';
+            if (icon) icon.className = 'fa-solid fa-chevron-up text-[10px]';
+        }
+    }
+}
+
+async function submitGenerateContent() {
+    if (!currentPromptId) return;
+
+    const promptText = getCurrentRenderedPromptText();
+    if (!promptText) {
+        showToast('Nội dung câu lệnh trống!');
+        return;
+    }
+
+    const extraInput = document.getElementById('usePromptExtraInput');
+    const extraInstruction = extraInput ? extraInput.value.trim() : '';
+
+    const errBanner = document.getElementById('usePromptErrorBanner');
+    const errText = document.getElementById('usePromptErrorText');
+    if (errBanner) errBanner.classList.add('hidden');
+
+    const loadingState = document.getElementById('usePromptLoadingState');
+    const loadingTimer = document.getElementById('usePromptLoadingTimer');
+    const submitBtn = document.getElementById('btnSubmitGenerateContent');
+    const submitBtnText = document.getElementById('btnSubmitGenerateContentText');
+
+    if (loadingState) loadingState.classList.remove('hidden');
+    if (submitBtn) submitBtn.disabled = true;
+    if (submitBtnText) submitBtnText.innerText = 'Đang gọi AI...';
+
+    // Start timer display
+    usePromptStartTime = Date.now();
+    if (usePromptTimerInterval) clearInterval(usePromptTimerInterval);
+    usePromptTimerInterval = setInterval(() => {
+        const sec = Math.floor((Date.now() - usePromptStartTime) / 1000);
+        if (loadingTimer) {
+            loadingTimer.innerText = `Đang đợi phản hồi từ ${usePromptProvider === 'openai' ? 'OpenAI' : 'Gemini'} (${sec}s)...`;
+        }
+    }, 500);
+
+    try {
+        const res = await fetch(`/api/prompts/${currentPromptId}/generate-content`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                prompt: promptText,
+                extra_instruction: extraInstruction,
+                provider: usePromptProvider
+            })
+        });
+
+        if (!res.ok) {
+            const err = await res.json().catch(() => ({}));
+            throw new Error(err.detail || 'Lỗi khi gọi AI sinh content');
+        }
+
+        const data = await res.json();
+        const contentOutput = data.content || '';
+
+        // Display in result box
+        const resultSection = document.getElementById('usePromptResultSection');
+        const resultText = document.getElementById('usePromptResultText');
+        const wordBadge = document.getElementById('usePromptWordCountBadge');
+        const copyBtn = document.getElementById('btnCopyUsePromptResult');
+        const saveBtn = document.getElementById('btnSaveUsePromptResult');
+
+        if (resultText) resultText.value = contentOutput;
+        if (resultSection) resultSection.classList.remove('hidden');
+
+        const words = contentOutput.trim() ? contentOutput.trim().split(/\s+/).filter(Boolean).length : 0;
+        if (wordBadge) wordBadge.innerText = `${words} từ`;
+
+        if (copyBtn) copyBtn.disabled = false;
+        if (saveBtn) saveBtn.disabled = false;
+
+        // Auto save to sample content if checked
+        const chkAutoSave = document.getElementById('chkAutoSaveSample');
+        if (chkAutoSave && chkAutoSave.checked) {
+            await saveGeneratedContentToSample(false);
+            showToast('AI đã tạo xong content và tự động lưu vào kết quả mẫu! 🎉');
+        } else {
+            showToast('AI đã tạo xong content!');
+        }
+
+    } catch (err) {
+        console.error('Error generating content:', err);
+        if (errBanner && errText) {
+            errText.innerText = err.message || 'Không thể kết nối hoặc API trả về lỗi.';
+            errBanner.classList.remove('hidden');
+        }
+        showToast(`Lỗi: ${err.message}`);
+    } finally {
+        if (usePromptTimerInterval) {
+            clearInterval(usePromptTimerInterval);
+            usePromptTimerInterval = null;
+        }
+        if (loadingState) loadingState.classList.add('hidden');
+        if (submitBtn) submitBtn.disabled = false;
+        if (submitBtnText) submitBtnText.innerText = 'Gửi AI & Tạo Content';
+    }
+}
+
+function copyUsePromptResult() {
+    const resultText = document.getElementById('usePromptResultText');
+    if (!resultText || !resultText.value.trim()) {
+        showToast('Chưa có nội dung để sao chép');
+        return;
+    }
+    navigator.clipboard.writeText(resultText.value).then(() => {
+        showToast('Đã sao chép phản hồi AI vào bộ nhớ tạm!');
+    }).catch(err => {
+        console.error('Clipboard error:', err);
+        showToast('Lỗi khi sao chép');
+    });
+}
+
+async function saveGeneratedContentToSample(showToastMessage = true) {
+    if (!currentPromptId) return;
+    const resultText = document.getElementById('usePromptResultText');
+    const content = resultText ? resultText.value.trim() : '';
+
+    if (!content) {
+        showToast('Nội dung trống, không thể lưu vào kết quả mẫu');
+        return;
+    }
+
+    const providerName = usePromptProvider === 'openai' ? 'OpenAI' : 'Gemini';
+    const title = `Phản hồi AI (${providerName})`;
+
+    try {
+        const res = await fetch(`/api/prompts/${currentPromptId}/sample-contents`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ title, content })
+        });
+        if (!res.ok) {
+            const err = await res.json().catch(() => ({}));
+            throw new Error(err.detail || 'Lỗi khi lưu kết quả mẫu');
+        }
+        const resData = await res.json();
+        if (resData.prompt) {
+            currentPromptDetail = resData.prompt;
+        } else {
+            const created = resData.sample || resData;
+            if (!currentPromptDetail.sample_contents) {
+                currentPromptDetail.sample_contents = [];
+            }
+            currentPromptDetail.sample_contents.push(created);
+        }
+        currentSampleContentIndex = (currentPromptDetail.sample_contents || []).length - 1;
+
+        if (currentNavTab === 'content') {
+            renderSampleContent(currentPromptDetail.sample_contents || []);
+        }
+
+        const found = currentPromptsList.find(p => p.id === currentPromptId);
+        if (found) {
+            found.sample_count = (currentPromptDetail.sample_contents || []).length;
+        }
+        updateSidebarSampleCount(currentPromptId, (currentPromptDetail.sample_contents || []).length);
+
+        if (showToastMessage) {
+            showToast('Đã lưu nội dung vào kết quả mẫu thành công! ⭐');
+        }
+    } catch (err) {
+        console.error('Error saving sample content:', err);
+        showToast(`Lỗi khi lưu: ${err.message}`);
+    }
 }
 
 // ==========================================
@@ -1422,7 +2597,17 @@ function getCurrentPromptCode() {
     if (formState['prompt_content']) {
         return formState['prompt_content'];
     }
-    return currentPromptDetail.prompt_code || currentPromptDetail.raw_content || "";
+    let text = currentPromptDetail.prompt_code || currentPromptDetail.raw_content || "";
+    if (currentPromptDetail.fields && currentPromptDetail.fields.length > 0) {
+        for (const f of currentPromptDetail.fields) {
+            const path = f.path;
+            const val = formState[path];
+            if (val !== undefined && val !== null && String(val).trim() !== '') {
+                text = text.split(path).join(String(val).trim());
+            }
+        }
+    }
+    return text;
 }
 
 async function openGenerateImageModal(promptId = null) {
