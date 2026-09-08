@@ -60,6 +60,7 @@ LABEL_MAPPING: Dict[str, str] = {
     "instructions": "Hướng dẫn / Instructions",
     "language": "Ngôn ngữ / Language",
     "primary_language": "Ngôn ngữ chính / Primary Language",
+    "role": "Vai trò"
 }
 
 def format_field_label(field_key_or_path: str, full_path: str = "") -> str:
@@ -113,37 +114,43 @@ format_label = format_field_label
 
 # ==========================================
 # Tự Động Phát Hiện Thuộc Tính Chính (Primary Attributes)
+# Định nghĩa: Các trường người dùng cần truyền nội dung vào hoặc chọn giá trị
 # ==========================================
 
-PRIMARY_HIGH_PRIORITY_KEYS = {
-    # Nhóm Nhân vật / Visual
-    "description", "subject", "subject_identity_lock", "wardrobe", "clothing", "outfit",
-    "pose", "style", "lighting", "layout", "aspect_ratio",
-    # Nhóm Content & Script
-    "topic", "hook", "product", "product_name", "target_audience", "problem", "solution",
-    "cta", "target_platform"
+import re
+
+PRIMARY_INPUT_CHOICE_KEYS = {
+    # Nhóm nhập liệu / tuỳ biến nội dung (User inputs)
+    "topic", "product", "product_name", "brand", "target_audience", "audience", "niche",
+    "hook", "hook_first_3s", "pain_point", "problem", "solution", "solution_product",
+    "cta", "call_to_action", "tone", "tone_of_voice", "voice", "keywords", "key_benefits",
+    "subject", "character", "description", "outfit", "wardrobe", "clothing", "top", "bottoms",
+    "pose", "expression", "environment", "location", "setting", "background",
+    # Nhóm lựa chọn giá trị (User choices / options)
+    "aspect_ratio", "ratio", "camera_angle", "angle", "shot_type", "lighting", "style",
+    "aesthetic", "mood", "genre", "platform", "target_platform", "format", "content_format",
+    "duration", "duration_seconds", "layout", "composition", "pacing", "color", "colors"
 }
 
-PRIMARY_MEDIUM_PRIORITY_KEYS = {
-    # Nhóm Nhân vật / Visual
-    "face", "hair", "eyes", "expression", "action", "environment", "setting", "background",
-    "camera", "camera_angle", "lens", "aesthetic", "mood", "atmosphere", "genre", "composition",
-    # Nhóm Content & Script
-    "audience", "niche", "platform", "framework", "tone", "pacing", "content_format", "content_type"
+SECONDARY_DETAIL_KEYS = {
+    "hair", "eyes", "face", "skin", "makeup", "accessories", "color_palette", "atmosphere",
+    "lens", "framing", "perspective", "action", "headline", "caption", "vietnamese_caption"
 }
 
-TECHNICAL_LOW_PRIORITY_KEYS = {
-    "version", "render_engine", "rendering_parameters", "iso", "shutter_speed",
-    "focal_length", "aperture", "color_temperature", "anti_patterns", "instructions",
-    "reference_instructions", "max_seconds", "min_seconds", "duration_seconds",
-    "print_readiness", "generation_profile"
+EXCLUDED_OR_TECHNICAL_KEYS = {
+    "instructions", "reference_instructions", "anti_patterns", "negative_prompt",
+    "reference_file", "render_engine", "rendering_parameters", "version", "iso",
+    "shutter_speed", "focal_length", "sensor", "sensor_size", "print_readiness",
+    "generation_profile", "id", "panel_id", "prompt_id", "original_index", "constraints",
+    "expected_output", "schema", "output_format", "panel_format", "grid_structure_panels"
 }
 
-def detect_primary_fields(fields: list, category: str = "character", min_primary: int = 3, max_primary: int = 7) -> list:
+def detect_primary_fields(fields: list, category: str = "image", min_primary: int = 3, max_primary: int = 8) -> list:
     """
-    Tự động chấm điểm và đánh dấu `is_primary = True` cho các thuộc tính cốt lõi của Prompt
-    khi chuyển đổi từ văn bản thô sang JSON.
-    Đảm bảo sau khi chuyển đổi JSON luôn có từ min_primary đến max_primary thuộc tính chính phù hợp.
+    Tự động chấm điểm và đánh dấu `is_primary = True` cho các thuộc tính cốt lõi của Prompt:
+    - Những trường người sử dụng cần truyền nội dung vào (topic, product, target_audience, outfit, pose...)
+    - Những trường cần lựa chọn giá trị (aspect_ratio, camera_angle, style, lighting, platform...)
+    - Các trường chứa biến placeholder mẫu: [nhập ...], <chủ đề>, {từ khóa}
     """
     if not fields:
         return fields
@@ -154,54 +161,72 @@ def detect_primary_fields(fields: list, category: str = "character", min_primary
         path = (f.get("path") or "").strip().lower()
         leaf = path.split(".")[-1] if "." in path else key
         val = str(f.get("value") or "").strip()
+        val_lower = val.lower()
 
         score = 0
         depth = path.count(".")
 
-        # Điểm ưu tiên từ khoá cốt lõi
-        if leaf in PRIMARY_HIGH_PRIORITY_KEYS or key in PRIMARY_HIGH_PRIORITY_KEYS:
-            score += 20
-        elif leaf in PRIMARY_MEDIUM_PRIORITY_KEYS or key in PRIMARY_MEDIUM_PRIORITY_KEYS:
-            score += 12
-        elif any(k in leaf for k in ["desc", "style", "light", "pose", "cloth", "scene", "hook", "target"]):
-            score += 8
+        # 1. Các trường nằm trong nhóm biến đầu vào tường minh (input_parameters, dynamic_input_variables, v.v.)
+        if any(p in path for p in ["input_parameters", "dynamic_input_variables", "user_inputs", "parameters", "variables"]):
+            score += 35
 
-        # Trừ điểm trường kỹ thuật hoặc sâu
-        if leaf in TECHNICAL_LOW_PRIORITY_KEYS or key in TECHNICAL_LOW_PRIORITY_KEYS:
-            score -= 15
+        # 2. Giá trị chứa placeholder cần người dùng truyền nội dung vào (vd: [tên sản phẩm], <topic>, {chủ đề})
+        if re.search(r'\[.+?\]|<.+?>|\{.+?\}', val):
+            score += 30
+        if any(kw in val_lower for kw in ["nhập ", "chọn ", "tùy chọn", "điền ", "ví dụ:"]):
+            score += 15
 
-        if "panel_" in path:
-            if "panel_1" in path:
-                score += 2
+        # 3. Thuộc tính chính người dùng cần nhập hoặc chọn giá trị
+        if leaf in PRIMARY_INPUT_CHOICE_KEYS or key in PRIMARY_INPUT_CHOICE_KEYS:
+            score += 25
+        elif any(k in leaf for k in ["product", "topic", "hook", "target", "tone", "style", "outfit", "cloth", "pose", "light", "camera", "aspect"]):
+            score += 15
+        elif leaf in SECONDARY_DETAIL_KEYS or key in SECONDARY_DETAIL_KEYS:
+            score += 10
+
+        # 4. Trừ điểm các trường kỹ thuật / cố định không cần người dùng can thiệp
+        if leaf in EXCLUDED_OR_TECHNICAL_KEYS or key in EXCLUDED_OR_TECHNICAL_KEYS:
+            score -= 35
+        if "instructions" in leaf or "instructions" in path:
+            score -= 30
+        if "reference" in leaf:
+            score -= 20
+
+        # 5. Phạt nặng các phân cảnh phụ trong storyboard (panel_2, panel_3, ... panel_25)
+        panel_match = re.search(r'panel_(\d+)', path)
+        if panel_match:
+            p_num = int(panel_match.group(1))
+            if p_num > 1:
+                score -= 30
             else:
-                score -= 10
+                score -= 5
 
+        # 6. Độ sâu đường dẫn: ưu tiên trường nông (top-level)
         if depth <= 2:
-            score += 5
+            score += 8
         elif depth >= 4:
-            score -= 5
+            score -= 8
 
-        # Giá trị có nội dung mô tả
-        if len(val) >= 15:
+        # 7. Giá trị có nội dung thực chất
+        if len(val) >= 10:
             score += 3
         elif len(val) == 0:
             score -= 5
 
         scored_fields.append((score, idx, f))
 
-    # Sắp xếp theo điểm giảm dần
+    # Sắp xếp điểm giảm dần
     scored_fields.sort(key=lambda x: (x[0], -x[1]), reverse=True)
 
-    # Chọn các trường có điểm cao >= 10, tối đa max_primary
     selected_indices = set()
     for score, idx, f in scored_fields:
-        if score >= 10 and len(selected_indices) < max_primary:
+        if score >= 15 and len(selected_indices) < max_primary:
             selected_indices.add(idx)
 
-    # Nếu chưa đủ min_primary, lấy thêm các trường có điểm cao nhất
+    # Đảm bảo tối thiểu min_primary nếu có trường điểm dương
     if len(selected_indices) < min_primary:
         for score, idx, f in scored_fields:
-            if idx not in selected_indices and score >= 0:
+            if idx not in selected_indices and score > 0:
                 selected_indices.add(idx)
                 if len(selected_indices) >= min_primary:
                     break

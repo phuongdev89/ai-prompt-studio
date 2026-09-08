@@ -5,7 +5,7 @@ let formState = {};
 let currentSlideIndex = 0;
 let currentTag = 'all';
 let currentTab = 'featured';
-let currentNavTab = 'character'; // 'character' | 'content'
+let currentNavTab = 'image'; // 'image' | 'content'
 let currentSampleContentIndex = 0;
 let usePromptProvider = 'openai';
 let searchDebounceTimer = null;
@@ -25,27 +25,27 @@ function parseCurrentRoute() {
     let tab = null;
     let promptId = null;
 
-    // 1. Check pathname: /character, /content, /character/:id, /content/:id
-    if (parts.length > 0 && (parts[0] === 'character' || parts[0] === 'content')) {
-        tab = parts[0];
+    // 1. Check pathname: /image, /content, /character, /image/:id, etc.
+    if (parts.length > 0 && (parts[0] === 'image' || parts[0] === 'character' || parts[0] === 'content')) {
+        tab = parts[0] === 'character' ? 'image' : parts[0];
         if (parts.length > 1 && parts[1]) {
             promptId = decodeURIComponent(parts[1]);
         }
     }
 
-    // 2. Check fallback hash (if user had old hash URL e.g. #content_100, #/content/100)
+    // 2. Check fallback hash (if user had old hash URL e.g. #content_100, #/content/100, #character/prompt_1)
     if (!tab && window.location.hash) {
         const rawHash = window.location.hash.replace(/^#\/?/, '').trim();
         const hashParts = rawHash.split('/').filter(Boolean);
         if (hashParts.length > 0) {
-            if (hashParts[0] === 'character' || hashParts[0] === 'content') {
-                tab = hashParts[0];
+            if (hashParts[0] === 'image' || hashParts[0] === 'character' || hashParts[0] === 'content') {
+                tab = hashParts[0] === 'character' ? 'image' : hashParts[0];
                 if (hashParts[1]) promptId = decodeURIComponent(hashParts[1]);
             } else if (rawHash.startsWith('content_')) {
                 tab = 'content';
                 promptId = rawHash;
             } else if (rawHash.startsWith('prompt_')) {
-                tab = 'character';
+                tab = 'image';
                 promptId = rawHash;
             }
         }
@@ -53,23 +53,25 @@ function parseCurrentRoute() {
 
     // 3. Fallback to localStorage if no route was in the URL bar
     if (!tab) {
-        const savedTab = localStorage.getItem('last_active_tab');
-        if (savedTab === 'character' || savedTab === 'content') {
+        let savedTab = localStorage.getItem('last_active_tab');
+        if (savedTab === 'character') savedTab = 'image';
+        if (savedTab === 'image' || savedTab === 'content') {
             tab = savedTab;
-            promptId = localStorage.getItem('last_active_prompt_' + tab) || null;
+            promptId = localStorage.getItem('last_active_prompt_' + tab) || localStorage.getItem('last_active_prompt_character') || null;
         }
     }
 
     // 4. Default fallback
     if (!tab) {
-        tab = 'character';
+        tab = 'image';
     }
 
     return { tab, promptId };
 }
 
 function updateBrowserRoute(tab, promptId = null, replace = true) {
-    if (!tab) tab = currentNavTab || 'character';
+    if (!tab) tab = currentNavTab || 'image';
+    if (tab === 'character') tab = 'image';
     const targetPath = promptId ? `/${tab}/${encodeURIComponent(promptId)}` : `/${tab}`;
 
     if (window.location.pathname !== targetPath || window.location.hash) {
@@ -647,12 +649,14 @@ function renderDetail(prompt) {
 
     // Toggle Content vs Character view elements
     const genImageBtn = document.getElementById('generateImageBtn');
+    const genImageActionSection = document.getElementById('genImageActionSection');
     const imageSliderContainer = document.getElementById('imageSliderContainer');
     const sampleContentContainer = document.getElementById('sampleContentContainer');
     const usePromptActionSection = document.getElementById('usePromptActionSection');
 
     if (isContent) {
         if (genImageBtn) genImageBtn.classList.add('hidden');
+        if (genImageActionSection) genImageActionSection.classList.add('hidden');
         if (imageSliderContainer) imageSliderContainer.classList.add('hidden');
         if (sampleContentContainer) sampleContentContainer.classList.remove('hidden');
         if (usePromptActionSection) usePromptActionSection.classList.remove('hidden');
@@ -661,6 +665,7 @@ function renderDetail(prompt) {
         renderSampleContent(samples);
     } else {
         if (genImageBtn) genImageBtn.classList.remove('hidden');
+        if (genImageActionSection) genImageActionSection.classList.remove('hidden');
         if (imageSliderContainer) imageSliderContainer.classList.remove('hidden');
         if (sampleContentContainer) sampleContentContainer.classList.add('hidden');
         if (usePromptActionSection) usePromptActionSection.classList.add('hidden');
@@ -818,13 +823,20 @@ function renderDynamicForm(fields) {
         displayedFields = primaryFields;
         if (displayedFields.length === 0) {
             formEl.innerHTML = `
-                <div class="p-8 text-center text-slate-400 text-xs space-y-2">
+                <div class="p-8 text-center text-slate-400 text-xs space-y-3">
                     <i class="fa-regular fa-star text-2xl text-amber-400/80 mb-1"></i>
-                    <p class="font-semibold text-slate-300">Chưa có thuộc tính chính nào được đánh dấu</p>
-                    <p class="text-slate-500 max-w-sm mx-auto">Chuyển sang tab <b>"Toàn bộ trường"</b> và bấm vào biểu tượng ngôi sao <i class="fa-regular fa-star text-amber-400"></i> bên cạnh trường bạn muốn hiển thị tại đây.</p>
-                    <button type="button" onclick="setFormTab('all')" class="mt-2 px-3.5 py-1.5 rounded-lg bg-dark-700 hover:bg-dark-600 text-white text-xs font-medium transition">
-                        Xem toàn bộ trường (${fields.length})
-                    </button>
+                    <p class="font-semibold text-slate-200">Chưa có thuộc tính chính nào được đánh dấu</p>
+                    <p class="text-slate-400 max-w-sm mx-auto leading-relaxed">Hệ thống có thể tự động phân tích những trường cần truyền nội dung hoặc lựa chọn giá trị để đánh dấu cho bạn.</p>
+                    <div class="flex items-center justify-center gap-2 pt-1 flex-wrap">
+                        <button type="button" onclick="suggestAndMarkPrimaryFields()"
+                                class="px-3.5 py-1.5 rounded-lg bg-gradient-to-r from-amber-600 to-amber-500 hover:from-amber-500 hover:to-amber-400 text-white text-xs font-semibold shadow-md shadow-amber-600/20 transition flex items-center gap-1.5 active:scale-95">
+                            <i class="fa-solid fa-wand-magic-sparkles text-xs"></i>
+                            <span>Gợi ý thuộc tính chính ngay</span>
+                        </button>
+                        <button type="button" onclick="setFormTab('all')" class="px-3.5 py-1.5 rounded-lg bg-dark-700 hover:bg-dark-600 text-slate-300 text-xs font-medium transition">
+                            Xem toàn bộ trường (${fields.length})
+                        </button>
+                    </div>
                 </div>
             `;
             return;
@@ -888,6 +900,54 @@ async function toggleFieldPrimary(fieldId, newStatus) {
     } catch (err) {
         console.error('Error toggling primary:', err);
         showToast('Lỗi khi cập nhật thuộc tính chính');
+    }
+}
+
+async function suggestAndMarkPrimaryFields() {
+    if (!currentPromptId) {
+        showToast('Vui lòng chọn một câu lệnh trước');
+        return;
+    }
+
+    const btn = document.getElementById('btnSuggestPrimary');
+    const originalHtml = btn ? btn.innerHTML : '';
+    if (btn) {
+        btn.disabled = true;
+        btn.innerHTML = '<i class="fa-solid fa-wand-magic-sparkles fa-spin text-amber-400 text-[11px]"></i> <span>AI đang phân tích...</span>';
+    }
+
+    try {
+        const res = await fetch(`/api/prompts/${currentPromptId}/suggest-primary-fields`, {
+            method: 'POST'
+        });
+        if (!res.ok) {
+            const err = await res.json().catch(() => ({}));
+            throw new Error(err.detail || 'Lỗi khi gợi ý thuộc tính chính');
+        }
+
+        const data = await res.json();
+        if (currentPromptDetail) {
+            currentPromptDetail.fields = data.fields || (data.prompt ? data.prompt.fields : currentPromptDetail.fields);
+        }
+
+        // Switch to featured tab so user immediately sees the marked primary fields
+        currentTab = 'featured';
+        const btnFeatured = document.getElementById('tabBtnFeatured');
+        const btnAll = document.getElementById('tabBtnAll');
+        if (btnFeatured) btnFeatured.className = 'px-3 py-1 rounded-md bg-dark-700 text-white font-medium transition flex items-center gap-1.5';
+        if (btnAll) btnAll.className = 'px-3 py-1 rounded-md text-slate-400 hover:text-white transition flex items-center gap-1.5';
+
+        renderDynamicForm(currentPromptDetail ? currentPromptDetail.fields : []);
+
+        showToast(data.message || `Đã gợi ý & đánh dấu ${data.suggested_count || 0} thuộc tính chính! ⭐`);
+    } catch (err) {
+        console.error('Error suggesting primary fields:', err);
+        showToast(`Lỗi: ${err.message}`);
+    } finally {
+        if (btn) {
+            btn.disabled = false;
+            btn.innerHTML = originalHtml;
+        }
     }
 }
 
@@ -1441,14 +1501,15 @@ function filterByTag(tag, evt) {
 }
 
 function switchNavTab(tab, targetPromptId = null, updateRoute = true) {
+    if (tab === 'character') tab = 'image';
     currentNavTab = tab;
 
-    const btnChar = document.getElementById('navTabCharacter');
+    const btnImage = document.getElementById('navTabImage') || document.getElementById('navTabCharacter');
     const btnContent = document.getElementById('navTabContent');
 
-    if (tab === 'character') {
-        if (btnChar) {
-            btnChar.className = 'px-3.5 py-1.5 rounded-lg text-xs font-semibold transition-all duration-200 flex items-center gap-2 bg-gradient-to-r from-brand-600 to-emerald-600 text-white shadow-md shadow-brand-600/20';
+    if (tab === 'image') {
+        if (btnImage) {
+            btnImage.className = 'px-3.5 py-1.5 rounded-lg text-xs font-semibold transition-all duration-200 flex items-center gap-2 bg-gradient-to-r from-brand-600 to-emerald-600 text-white shadow-md shadow-brand-600/20';
         }
         if (btnContent) {
             btnContent.className = 'px-3.5 py-1.5 rounded-lg text-xs font-medium transition-all duration-200 flex items-center gap-2 text-slate-400 hover:text-white hover:bg-dark-750';
@@ -1457,24 +1518,27 @@ function switchNavTab(tab, targetPromptId = null, updateRoute = true) {
         if (btnContent) {
             btnContent.className = 'px-3.5 py-1.5 rounded-lg text-xs font-semibold transition-all duration-200 flex items-center gap-2 bg-gradient-to-r from-cyan-600 to-teal-600 text-white shadow-md shadow-cyan-600/20';
         }
-        if (btnChar) {
-            btnChar.className = 'px-3.5 py-1.5 rounded-lg text-xs font-medium transition-all duration-200 flex items-center gap-2 text-slate-400 hover:text-white hover:bg-dark-750';
+        if (btnImage) {
+            btnImage.className = 'px-3.5 py-1.5 rounded-lg text-xs font-medium transition-all duration-200 flex items-center gap-2 text-slate-400 hover:text-white hover:bg-dark-750';
         }
     }
 
     // Immediate visual toggle of media vs content container
     const genImageBtn = document.getElementById('generateImageBtn');
+    const genImageActionSection = document.getElementById('genImageActionSection');
     const imageSliderContainer = document.getElementById('imageSliderContainer');
     const sampleContentContainer = document.getElementById('sampleContentContainer');
     const usePromptActionSection = document.getElementById('usePromptActionSection');
 
     if (tab === 'content') {
         if (genImageBtn) genImageBtn.classList.add('hidden');
+        if (genImageActionSection) genImageActionSection.classList.add('hidden');
         if (imageSliderContainer) imageSliderContainer.classList.add('hidden');
         if (sampleContentContainer) sampleContentContainer.classList.remove('hidden');
         if (usePromptActionSection) usePromptActionSection.classList.remove('hidden');
     } else {
         if (genImageBtn) genImageBtn.classList.remove('hidden');
+        if (genImageActionSection) genImageActionSection.classList.remove('hidden');
         if (imageSliderContainer) imageSliderContainer.classList.remove('hidden');
         if (sampleContentContainer) sampleContentContainer.classList.add('hidden');
         if (usePromptActionSection) usePromptActionSection.classList.add('hidden');
@@ -1496,6 +1560,7 @@ function switchNavTab(tab, targetPromptId = null, updateRoute = true) {
         } else {
             tagFilters.innerHTML = `
                 <button onclick="filterByTag('all', event)" class="tag-btn active px-2.5 py-1 rounded-md bg-brand-600 text-white font-medium whitespace-nowrap transition">Tất cả</button>
+                <button onclick="filterByTag('Character', event)" class="tag-btn px-2.5 py-1 rounded-md bg-dark-700 hover:bg-dark-600 text-slate-300 whitespace-nowrap transition">Character</button>
                 <button onclick="filterByTag('has_img', event)" class="tag-btn px-2.5 py-1 rounded-md bg-dark-700 hover:bg-dark-600 text-slate-300 whitespace-nowrap transition">Có ảnh mẫu</button>
                 <button onclick="filterByTag('no_img', event)" class="tag-btn px-2.5 py-1 rounded-md bg-dark-700 hover:bg-dark-600 text-slate-300 whitespace-nowrap transition">Chưa có ảnh</button>
                 <button onclick="filterByTag('storyboard', event)" class="tag-btn px-2.5 py-1 rounded-md bg-dark-700 hover:bg-dark-600 text-slate-300 whitespace-nowrap transition">Storyboard</button>
@@ -2168,6 +2233,8 @@ function updateSidebarSampleCount(promptId, count) {
     }
 }
 
+let draggedSampleIndex = null;
+
 function openAddSampleModal() {
     const modal = document.getElementById('addSampleContentModal');
     if (!modal) return;
@@ -2175,6 +2242,9 @@ function openAddSampleModal() {
     const textInput = document.getElementById('manualSampleTextInput');
     if (titleInput) titleInput.value = '';
     if (textInput) textInput.value = '';
+
+    renderModalSampleList();
+
     modal.classList.remove('hidden');
     if (textInput) textInput.focus();
 }
@@ -2184,6 +2254,187 @@ function closeAddSampleModal() {
     if (modal) modal.classList.add('hidden');
 }
 
+function renderModalSampleList() {
+    const gridEl = document.getElementById('modalSampleListGrid');
+    const emptyEl = document.getElementById('modalSampleEmptyState');
+    const countBadge = document.getElementById('modalSampleCountBadge');
+    if (!gridEl) return;
+
+    const samples = (currentPromptDetail ? currentPromptDetail.sample_contents : []) || [];
+
+    if (countBadge) {
+        countBadge.innerText = `${samples.length} mẫu`;
+    }
+
+    if (samples.length === 0) {
+        gridEl.innerHTML = '';
+        if (emptyEl) emptyEl.classList.remove('hidden');
+        return;
+    }
+
+    if (emptyEl) emptyEl.classList.add('hidden');
+    gridEl.innerHTML = '';
+
+    samples.forEach((item, index) => {
+        const card = document.createElement('div');
+        card.className = 'group relative p-3.5 rounded-xl bg-dark-900 border border-dark-750 hover:border-cyan-500/50 flex flex-col justify-between gap-2.5 transition cursor-grab active:cursor-grabbing shadow-sm select-none';
+        card.setAttribute('draggable', 'true');
+        card.setAttribute('data-sample-id', item.id);
+        card.setAttribute('data-index', index);
+
+        const titleText = item.title || `Content mẫu #${index + 1}`;
+        const previewText = (item.content || '').trim().replace(/\s+/g, ' ').slice(0, 150);
+        const wordCount = (item.content || '').trim() ? (item.content || '').trim().split(/\s+/).filter(Boolean).length : 0;
+        const dateStr = item.created_at ? new Date(item.created_at).toLocaleDateString('vi-VN') : '';
+
+        card.innerHTML = `
+            <div>
+                <div class="flex items-center justify-between gap-2 mb-1.5">
+                    <div class="flex items-center gap-1.5 min-w-0">
+                        <span class="text-slate-500 group-hover:text-cyan-400 text-xs transition cursor-grab" title="Kéo để đổi vị trí">
+                            <i class="fa-solid fa-grip-vertical"></i>
+                        </span>
+                        <span class="text-[10px] font-mono px-1.5 py-0.5 rounded bg-dark-800 text-cyan-400 border border-cyan-500/30 flex-shrink-0">
+                            #${index + 1}
+                        </span>
+                        <h5 class="text-xs font-semibold text-slate-200 truncate group-hover:text-white transition" title="${escapeHtml(titleText)}">
+                            ${escapeHtml(titleText)}
+                        </h5>
+                    </div>
+                    <button type="button" onclick="deleteSampleFromModal(${item.id}, event)"
+                            class="p-1 rounded-lg bg-rose-500/10 hover:bg-rose-500 text-rose-400 hover:text-white transition text-xs flex-shrink-0"
+                            title="Xóa mẫu này">
+                        <i class="fa-regular fa-trash-can"></i>
+                    </button>
+                </div>
+                <p class="text-[11px] text-slate-400 line-clamp-2 leading-relaxed font-sans select-none">
+                    ${escapeHtml(previewText)}
+                </p>
+            </div>
+            <div class="flex items-center justify-between text-[10px] text-slate-500 font-mono border-t border-dark-800/80 pt-1.5">
+                <span>${wordCount} từ</span>
+                <span>${dateStr}</span>
+            </div>
+        `;
+
+        // HTML5 Drag & Drop Listeners
+        card.addEventListener('dragstart', (e) => {
+            draggedSampleIndex = index;
+            card.classList.add('opacity-40', 'scale-95', 'border-cyan-500');
+            e.dataTransfer.effectAllowed = 'move';
+            e.dataTransfer.setData('text/plain', index);
+        });
+
+        card.addEventListener('dragend', () => {
+            card.classList.remove('opacity-40', 'scale-95', 'border-cyan-500');
+            draggedSampleIndex = null;
+            document.querySelectorAll('#modalSampleListGrid > div').forEach(el => {
+                el.classList.remove('border-cyan-400', 'bg-cyan-950/20', 'ring-2', 'ring-cyan-500/30');
+            });
+        });
+
+        card.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            e.dataTransfer.dropEffect = 'move';
+            card.classList.add('border-cyan-400', 'bg-cyan-950/20');
+        });
+
+        card.addEventListener('dragleave', () => {
+            card.classList.remove('border-cyan-400', 'bg-cyan-950/20');
+        });
+
+        card.addEventListener('drop', async (e) => {
+            e.preventDefault();
+            card.classList.remove('border-cyan-400', 'bg-cyan-950/20');
+            if (draggedSampleIndex === null || draggedSampleIndex === index) return;
+
+            const samplesArr = currentPromptDetail?.sample_contents || [];
+            if (!samplesArr || samplesArr.length === 0) return;
+
+            // Reorder elements
+            const movedItem = samplesArr.splice(draggedSampleIndex, 1)[0];
+            samplesArr.splice(index, 0, movedItem);
+
+            // Re-render UI immediately
+            renderModalSampleList();
+            renderSampleContent(samplesArr);
+
+            // Persist order to SQLite DB
+            await persistSampleReorder();
+        });
+
+        gridEl.appendChild(card);
+    });
+}
+
+async function persistSampleReorder() {
+    if (!currentPromptId || !currentPromptDetail?.sample_contents) return;
+    const ordered_ids = currentPromptDetail.sample_contents.map(s => s.id);
+    try {
+        const res = await fetch(`/api/prompts/${currentPromptId}/sample-contents/reorder`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ ordered_ids })
+        });
+        if (!res.ok) {
+            const err = await res.json().catch(() => ({}));
+            throw new Error(err.detail || 'Lỗi khi lưu vị trí');
+        }
+        showToast('Đã lưu vị trí hiển thị mẫu mới!');
+    } catch (err) {
+        console.error('Error reordering samples:', err);
+        showToast(`Lỗi: ${err.message}`);
+    }
+}
+
+async function deleteSampleFromModal(sampleId, event) {
+    if (event) {
+        event.stopPropagation();
+        event.preventDefault();
+    }
+    if (!currentPromptId) return;
+
+    const samples = currentPromptDetail?.sample_contents || [];
+    const targetSample = samples.find(s => s.id === sampleId);
+    const title = targetSample?.title || 'Mẫu này';
+
+    if (!confirm(`Bạn có chắc chắn muốn xóa "${title}"?`)) return;
+
+    try {
+        const res = await fetch(`/api/prompts/${currentPromptId}/sample-contents/${sampleId}`, {
+            method: 'DELETE'
+        });
+        if (!res.ok) {
+            const err = await res.json().catch(() => ({}));
+            throw new Error(err.detail || 'Lỗi khi xóa mẫu');
+        }
+
+        // Remove from currentPromptDetail
+        const idx = samples.findIndex(s => s.id === sampleId);
+        if (idx !== -1) {
+            samples.splice(idx, 1);
+        }
+        if (currentSampleContentIndex >= samples.length && currentSampleContentIndex > 0) {
+            currentSampleContentIndex = samples.length - 1;
+        }
+
+        renderModalSampleList();
+        renderSampleContent(samples);
+
+        // Update card in sidebar
+        const found = currentPromptsList.find(p => p.id === currentPromptId);
+        if (found) {
+            found.sample_count = samples.length;
+        }
+        updateSidebarSampleCount(currentPromptId, samples.length);
+
+        showToast('Đã xóa Content mẫu!');
+    } catch (err) {
+        console.error('Error deleting sample from modal:', err);
+        showToast(`Lỗi: ${err.message}`);
+    }
+}
+
 async function submitAddManualSample() {
     if (!currentPromptId) return;
     const title = document.getElementById('manualSampleTitleInput').value.trim();
@@ -2191,6 +2442,12 @@ async function submitAddManualSample() {
     if (!content) {
         showToast('Vui lòng nhập nội dung văn bản mẫu');
         return;
+    }
+
+    const submitBtn = document.getElementById('btnSubmitAddSample');
+    if (submitBtn) {
+        submitBtn.disabled = true;
+        submitBtn.innerHTML = '<i class="fa-solid fa-circle-notch fa-spin text-xs"></i> <span>Đang lưu...</span>';
     }
 
     try {
@@ -2215,7 +2472,16 @@ async function submitAddManualSample() {
         }
         currentSampleContentIndex = (currentPromptDetail.sample_contents || []).length - 1;
 
-        closeAddSampleModal();
+        // Reset input fields
+        const titleInput = document.getElementById('manualSampleTitleInput');
+        const textInput = document.getElementById('manualSampleTextInput');
+        if (titleInput) titleInput.value = '';
+        if (textInput) textInput.value = '';
+
+        // Update modal gridview immediately so user sees new card
+        renderModalSampleList();
+
+        // Update main preview behind modal
         renderSampleContent(currentPromptDetail.sample_contents || []);
 
         const found = currentPromptsList.find(p => p.id === currentPromptId);
@@ -2228,6 +2494,11 @@ async function submitAddManualSample() {
     } catch (err) {
         console.error('Error adding sample content:', err);
         showToast(`Lỗi: ${err.message}`);
+    } finally {
+        if (submitBtn) {
+            submitBtn.disabled = false;
+            submitBtn.innerHTML = '<i class="fa-solid fa-plus text-xs"></i> <span>Lưu vào danh sách mẫu</span>';
+        }
     }
 }
 

@@ -28,7 +28,7 @@ def get_db():
 def ensure_database():
     if not DB_PATH.exists():
         print(f"[!] Database not found at {DB_PATH}. Initializing and migrating...")
-        from scripts.migrate_json_to_sqlite import migrate
+        from tests.migrate_json_to_sqlite import migrate
         migrate(json_path=JSON_DATA_PATH, db_path=DB_PATH)
     else:
         # Check if tables exist
@@ -37,7 +37,7 @@ def ensure_database():
             cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='prompts'")
             if not cursor.fetchone():
                 print("[!] Tables not found in database. Running migration...")
-                from scripts.migrate_json_to_sqlite import migrate
+                from tests.migrate_json_to_sqlite import migrate
                 migrate(json_path=JSON_DATA_PATH, db_path=DB_PATH)
 
     # Ensure columns and tables exist
@@ -57,11 +57,20 @@ def ensure_database():
         prompt_cols = [c["name"] for c in cursor.fetchall()]
         if "category" not in prompt_cols:
             print("[*] Adding category column to prompts table...")
-            cursor.execute("ALTER TABLE prompts ADD COLUMN category TEXT DEFAULT 'character'")
-            cursor.execute("UPDATE prompts SET category = 'character' WHERE category IS NULL OR category = ''")
+            cursor.execute("ALTER TABLE prompts ADD COLUMN category TEXT DEFAULT 'image'")
+            cursor.execute("UPDATE prompts SET category = 'image' WHERE category IS NULL OR category = ''")
         if "note" not in prompt_cols:
             print("[*] Adding note column to prompts table...")
             cursor.execute("ALTER TABLE prompts ADD COLUMN note TEXT DEFAULT ''")
+
+        # Migration: convert legacy 'character' category to 'image'
+        cursor.execute("UPDATE prompts SET category = 'image' WHERE category = 'character' OR category IS NULL OR category = ''")
+
+        # Migration: ensure 'Character' tag is assigned to all existing prompts in category = 'image'
+        cursor.execute("""
+            INSERT OR IGNORE INTO prompt_tags (prompt_id, tag)
+            SELECT id, 'Character' FROM prompts WHERE category = 'image'
+        """)
 
         # 3. Ensure is_primary column exists on prompt_fields table
         cursor.execute("PRAGMA table_info(prompt_fields)")
@@ -81,18 +90,26 @@ def ensure_database():
                       AND is_primary = 0
                 """, (kw,))
 
-        # 4. Ensure sample_contents table exists
+        # 4. Ensure sample_contents table exists & has order_index
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS sample_contents (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 prompt_id TEXT NOT NULL,
                 content TEXT NOT NULL,
                 title TEXT DEFAULT '',
+                order_index INTEGER DEFAULT 0,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 FOREIGN KEY (prompt_id) REFERENCES prompts(id) ON DELETE CASCADE
             )
         """)
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_sample_contents_prompt_id ON sample_contents(prompt_id);")
+
+        cursor.execute("PRAGMA table_info(sample_contents)")
+        sc_cols = [c["name"] for c in cursor.fetchall()]
+        if "order_index" not in sc_cols:
+            print("[*] Adding order_index column to sample_contents table...")
+            cursor.execute("ALTER TABLE sample_contents ADD COLUMN order_index INTEGER DEFAULT 0")
+            cursor.execute("UPDATE sample_contents SET order_index = id WHERE order_index = 0 OR order_index IS NULL")
 
         # 5. Ensure prompt_tags table exists
         cursor.execute("""

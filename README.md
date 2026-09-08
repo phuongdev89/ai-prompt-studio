@@ -26,10 +26,9 @@ phan_tich_1/
 ├── data/                          # Dữ liệu & Cơ sở dữ liệu
 │   ├── prompts.db                 # SQLite Database chính
 │   ├── cleaned_prompts.json       # Tệp JSON đã làm sạch (backup)
-│   ├── raw/                       # Dữ liệu Facebook posts gốc
 │   └── images/                    # Thư mục lưu trữ ảnh đã tải về máy
 │
-├── scripts/                       # Các công cụ script chạy độc lập
+├── tests/                         # Các công cụ script và test chạy độc lập
 │   ├── download_images.py         # Script tải toàn bộ ảnh (đa luồng, có resume)
 │   ├── migrate_json_to_sqlite.py  # Script import JSON sang SQLite
 │   ├── process_prompts.py         # Script làm sạch và bóc tách dữ liệu
@@ -75,7 +74,7 @@ python run.py --no-browser
 Bạn có thể chạy script `download_images.py` bất cứ khi nào bạn muốn để tải toàn bộ ảnh từ URL về thư mục `data/images/`:
 
 ```bash
-python scripts/download_images.py
+python tests/download_images.py
 ```
 
 ### Các tính năng của Script tải ảnh:
@@ -87,16 +86,16 @@ python scripts/download_images.py
 **Tùy chọn khi tải ảnh:**
 ```bash
 # Tăng số luồng tải đồng thời lên 15 luồng:
-python scripts/download_images.py --workers 15
+python tests/download_images.py --workers 15
 
 # Tải thử nghiệm 10 ảnh:
-python scripts/download_images.py --limit 10
+python tests/download_images.py --limit 10
 
 # Tăng thời gian chờ (timeout) cho mạng chậm:
-python scripts/download_images.py --timeout 30
+python tests/download_images.py --timeout 30
 
 # Bắt buộc tải lại cả những ảnh đã có:
-python scripts/download_images.py --force
+python tests/download_images.py --force
 ```
 
 ---
@@ -105,15 +104,15 @@ python scripts/download_images.py --force
 
 - **Import/Khởi tạo lại cơ sở dữ liệu SQLite từ JSON**:
   ```bash
-  python scripts/migrate_json_to_sqlite.py
+  python tests/migrate_json_to_sqlite.py
   ```
-- **Làm sạch dữ liệu từ tệp raw**:
+- **Làm sạch dữ liệu**:
   ```bash
-  python scripts/process_prompts.py
+  python tests/process_prompts.py
   ```
 - **Kiểm tra phân loại dataset**:
   ```bash
-  python scripts/inspect_dataset.py
+  python tests/inspect_dataset.py
   ```
 
 ---

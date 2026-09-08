@@ -74,7 +74,7 @@ def run_download(workers=10, limit=None, timeout=15, force=False):
 
     if not DB_FILE.exists():
         print(f"[!] Database not found at {DB_FILE}. Running migration first...")
-        from scripts.migrate_json_to_sqlite import migrate
+        from tests.migrate_json_to_sqlite import migrate
         migrate()
 
     conn = sqlite3.connect(DB_FILE)

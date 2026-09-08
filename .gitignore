@@ -1,2 +1,10 @@
 .env
 .idea
+.agents
+__pycache__/
+*.py[cod]
+*$py.class
+*.tmp
+*.bak
+data/prompts.db-shm
+data/prompts.db-wal

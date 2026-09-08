@@ -11,7 +11,7 @@ class CreatePromptRequest(BaseModel):
     prompt: str = Field(..., description="Nội dung câu lệnh (JSON hoặc Text)")
     media: Optional[str] = Field(None, description="URL hoặc đường dẫn ảnh/video kết quả mẫu")
     images: Optional[List[str]] = Field(None, description="Danh sách URL hoặc Base64 ảnh tải lên từ máy tính")
-    category: Optional[str] = Field("character", description="Loại prompt: 'character' hoặc 'content'")
+    category: Optional[str] = Field("image", description="Loại prompt: 'image' hoặc 'content'")
     note: Optional[str] = Field("", description="Ghi chú / chú thích cho câu lệnh")
     sample_content: Optional[str] = Field(None, description="Nội dung kết quả mẫu dạng văn bản")
 
@@ -26,6 +26,9 @@ class GenerateContentRequest(BaseModel):
 class AddSampleContentRequest(BaseModel):
     content: str = Field(..., description="Nội dung văn bản mẫu")
     title: Optional[str] = Field("", description="Tiêu đề mẫu (tùy chọn)")
+
+class ReorderSampleContentsRequest(BaseModel):
+    ordered_ids: List[int] = Field(..., description="Danh sách ID mẫu theo thứ tự hiển thị mới")
 
 class UpdatePromptRequest(BaseModel):
     title: Optional[str] = None
@@ -76,13 +79,15 @@ class AddTagRequest(BaseModel):
 def list_prompts(
     q: Optional[str] = Query(None, description="Search keyword"),
     tag: str = Query("all", description="Tag filter: all, has_img, has_sample, storyboard, portrait, video, seo, live"),
-    category: Optional[str] = Query("character", description="Filter by category: 'character' or 'content'"),
+    category: Optional[str] = Query("image", description="Filter by category: 'image' or 'content'"),
     limit: Optional[int] = Query(None, description="Limit results"),
     offset: int = Query(0, description="Offset results")
 ):
     query_val = q if isinstance(q, str) else None
     tag_val = tag if isinstance(tag, str) else "all"
-    cat_val = category if isinstance(category, str) else "character"
+    cat_val = category if isinstance(category, str) else "image"
+    if cat_val == "character":
+        cat_val = "image"
     limit_val = limit if isinstance(limit, int) else None
     offset_val = offset if isinstance(offset, int) else 0
 
@@ -121,7 +126,10 @@ def create_prompt(payload: CreatePromptRequest):
         raw_media=None
     )
     parsed_data["images"] = media_list
-    parsed_data["category"] = payload.category or "character"
+    cat = payload.category or "image"
+    if cat == "character":
+        cat = "image"
+    parsed_data["category"] = cat
     parsed_data["note"] = payload.note or ""
     parsed_data["sample_content"] = payload.sample_content
 
@@ -200,6 +208,25 @@ def toggle_field_primary(prompt_id: str, field_id: int, payload: SetPrimaryField
         "is_primary": payload.is_primary
     }
 
+@router.post("/prompts/{prompt_id}/suggest-primary-fields")
+def suggest_primary_fields_endpoint(prompt_id: str):
+    prompt = PromptRepository.get_prompt_by_id(prompt_id)
+    if not prompt:
+        raise HTTPException(status_code=404, detail="Prompt không tồn tại")
+
+    refreshed, message = PromptRepository.suggest_and_apply_primary_fields(prompt_id)
+    if not refreshed:
+        raise HTTPException(status_code=500, detail="Không thể gợi ý thuộc tính chính")
+
+    primaries = [f for f in (refreshed.get("fields") or []) if f.get("is_primary")]
+    return {
+        "status": "success",
+        "message": message or f"Đã gợi ý & đánh dấu {len(primaries)} thuộc tính chính!",
+        "suggested_count": len(primaries),
+        "fields": refreshed.get("fields") or [],
+        "prompt": refreshed
+    }
+
 @router.post("/prompts/{prompt_id}/generate-content")
 def generate_content_for_prompt(prompt_id: str, payload: GenerateContentRequest):
     from app.services.content_generator import call_ai_generate_content
@@ -263,6 +290,23 @@ def delete_sample_content_endpoint(prompt_id: str, content_id: int):
     return {
         "status": "success",
         "message": "Đã xóa content mẫu thành công!",
+        "prompt": refreshed
+    }
+
+@router.post("/prompts/{prompt_id}/sample-contents/reorder")
+def reorder_sample_contents_endpoint(prompt_id: str, payload: ReorderSampleContentsRequest):
+    prompt = PromptRepository.get_prompt_by_id(prompt_id)
+    if not prompt:
+        raise HTTPException(status_code=404, detail="Prompt không tồn tại")
+
+    success = PromptRepository.reorder_sample_contents(prompt_id, payload.ordered_ids)
+    if not success:
+        raise HTTPException(status_code=500, detail="Không thể cập nhật thứ tự mẫu")
+
+    refreshed = PromptRepository.get_prompt_by_id(prompt_id)
+    return {
+        "status": "success",
+        "message": "Đã cập nhật thứ tự content mẫu thành công!",
         "prompt": refreshed
     }
 

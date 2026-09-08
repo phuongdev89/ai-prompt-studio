@@ -1,16 +1,21 @@
 import json
 import sqlite3
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, Tuple
 from app.db.database import get_db
 from app.services.label_mapping import format_field_label, detect_primary_fields
 
 class PromptRepository:
 
     @staticmethod
-    def get_prompts(query: Optional[str] = None, tag: str = "all", category: Optional[str] = "character", limit: Optional[int] = None, offset: int = 0) -> List[Dict[str, Any]]:
+    def get_prompts(query: Optional[str] = None, tag: str = "all", category: Optional[str] = "image", limit: Optional[int] = None, offset: int = 0) -> List[Dict[str, Any]]:
         with get_db() as conn:
             cursor = conn.cursor()
             
+            # Map legacy 'character' alias to 'image'
+            cat_filter = category
+            if cat_filter == "character":
+                cat_filter = "image"
+
             # Base query
             sql = """
                 SELECT 
@@ -33,9 +38,9 @@ class PromptRepository:
             params = []
 
             # Category filter
-            if category:
+            if cat_filter:
                 sql += " AND p.category = ?"
-                params.append(category)
+                params.append(cat_filter)
 
             # Tag filters
             if tag == "has_img":
@@ -150,10 +155,10 @@ class PromptRepository:
 
             # Fetch sample contents
             cursor.execute("""
-                SELECT id, prompt_id, content, title, created_at
+                SELECT id, prompt_id, content, title, order_index, created_at
                 FROM sample_contents
                 WHERE prompt_id = ?
-                ORDER BY id ASC
+                ORDER BY order_index ASC, id ASC
             """, (prompt_id,))
             prompt["sample_contents"] = cursor.fetchall()
 
@@ -201,7 +206,7 @@ class PromptRepository:
             # Fetch category
             cursor.execute("SELECT category FROM prompts WHERE id = ?", (prompt_id,))
             p_row = cursor.fetchone()
-            cat = p_row["category"] if p_row else "character"
+            cat = p_row["category"] if p_row else "image"
 
             # Delete old fields and insert new ones
             cursor.execute("DELETE FROM prompt_fields WHERE prompt_id = ?", (prompt_id,))
@@ -325,7 +330,9 @@ class PromptRepository:
             prompt_code = parsed_data.get("prompt_code", raw_content)
             parsed_json_str = json.dumps(parsed_data.get("parsed_json"), ensure_ascii=False) if parsed_data.get("parsed_json") else None
 
-            category = parsed_data.get("category", "character")
+            category = parsed_data.get("category", "image")
+            if category == "character":
+                category = "image"
             note = parsed_data.get("note", "")
 
             # Insert prompt
@@ -418,23 +425,66 @@ class PromptRepository:
             return cursor.rowcount > 0
 
     @staticmethod
+    def suggest_and_apply_primary_fields(prompt_id: str, min_primary: int = 3, max_primary: int = 8) -> Tuple[Optional[Dict[str, Any]], str]:
+        from app.services.ai_primary_suggester import call_ai_suggest_primary_fields
+        prompt = PromptRepository.get_prompt_by_id(prompt_id)
+        if not prompt:
+            return None, "Prompt không tồn tại"
+
+        fields = prompt.get("fields") or []
+        if not fields:
+            return prompt, "Prompt không có trường tham số nào"
+
+        success, updated_fields, msg = call_ai_suggest_primary_fields(prompt, fields)
+
+        with get_db() as conn:
+            cursor = conn.cursor()
+            for f in updated_fields:
+                is_pri = 1 if f.get("is_primary") else 0
+                cursor.execute("""
+                    UPDATE prompt_fields
+                    SET is_primary = ?
+                    WHERE id = ? AND prompt_id = ?
+                """, (is_pri, f["id"], prompt_id))
+            conn.commit()
+
+        return PromptRepository.get_prompt_by_id(prompt_id), msg
+
+    @staticmethod
     def add_sample_content(prompt_id: str, content: str, title: str = "") -> Optional[Dict[str, Any]]:
         clean_content = (content or "").strip()
         if not clean_content:
             return None
         with get_db() as conn:
             cursor = conn.cursor()
-            cursor.execute("SELECT COUNT(*) as cnt FROM sample_contents WHERE prompt_id = ?", (prompt_id,))
-            cnt = cursor.fetchone()["cnt"]
+            cursor.execute("SELECT COUNT(*) as cnt, COALESCE(MAX(order_index), 0) + 1 as next_order FROM sample_contents WHERE prompt_id = ?", (prompt_id,))
+            row = cursor.fetchone()
+            cnt = row["cnt"] if row else 0
+            next_order = row["next_order"] if row else 1
             sample_title = title.strip() or f"Content mẫu #{cnt + 1}"
             cursor.execute("""
-                INSERT INTO sample_contents (prompt_id, content, title)
-                VALUES (?, ?, ?)
-            """, (prompt_id, clean_content, sample_title))
+                INSERT INTO sample_contents (prompt_id, content, title, order_index)
+                VALUES (?, ?, ?, ?)
+            """, (prompt_id, clean_content, sample_title, next_order))
             content_id = cursor.lastrowid
             conn.commit()
-            cursor.execute("SELECT id, prompt_id, content, title, created_at FROM sample_contents WHERE id = ?", (content_id,))
+            cursor.execute("SELECT id, prompt_id, content, title, order_index, created_at FROM sample_contents WHERE id = ?", (content_id,))
             return cursor.fetchone()
+
+    @staticmethod
+    def reorder_sample_contents(prompt_id: str, ordered_ids: List[int]) -> bool:
+        if not ordered_ids:
+            return True
+        with get_db() as conn:
+            cursor = conn.cursor()
+            for idx, cid in enumerate(ordered_ids):
+                cursor.execute("""
+                    UPDATE sample_contents
+                    SET order_index = ?
+                    WHERE id = ? AND prompt_id = ?
+                """, (idx, cid, prompt_id))
+            conn.commit()
+            return True
 
     @staticmethod
     def delete_sample_content(prompt_id: str, content_id: int) -> bool:
@@ -591,7 +641,7 @@ class PromptRepository:
             target_fields = fields
             cursor.execute("SELECT category FROM prompts WHERE id = ?", (prompt_id,))
             p_row = cursor.fetchone()
-            cat = p_row["category"] if p_row else "character"
+            cat = p_row["category"] if p_row else "image"
 
             if target_fields is None and parsed_json:
                 target_fields = extract_flat_fields(parsed_json)
@@ -658,11 +708,21 @@ class PromptRepository:
             parsed_json_str = json.dumps(parsed_json, ensure_ascii=False) if parsed_json else None
             clean_raw = raw_content if raw_content is not None else prompt_code
 
+            # Inherit category and note from parent
+            parent_cat = "image"
+            parent_note = ""
+            if parent_prompt_id:
+                cursor.execute("SELECT category, note FROM prompts WHERE id = ?", (parent_prompt_id,))
+                p_info = cursor.fetchone()
+                if p_info:
+                    parent_cat = p_info.get("category") or "image"
+                    parent_note = p_info.get("note") or ""
+
             # Insert new prompt record
             cursor.execute("""
-                INSERT INTO prompts (id, original_index, title, raw_title, prompt_type, raw_content, prompt_code, parsed_json)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-            """, (new_id, new_idx, title, title, prompt_type, clean_raw, prompt_code, parsed_json_str))
+                INSERT INTO prompts (id, original_index, title, raw_title, prompt_type, raw_content, prompt_code, parsed_json, category, note)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, (new_id, new_idx, title, title, prompt_type, clean_raw, prompt_code, parsed_json_str, parent_cat, parent_note))
 
             # Copy parent images references so new version retains samples
             if parent_prompt_id:
@@ -683,7 +743,7 @@ class PromptRepository:
             target_fields = fields
             cursor.execute("SELECT category FROM prompts WHERE id = ?", (new_id,))
             p_row = cursor.fetchone()
-            cat = p_row["category"] if p_row else "character"
+            cat = p_row["category"] if p_row else parent_cat
 
             if target_fields is None and parsed_json:
                 target_fields = extract_flat_fields(parsed_json)
