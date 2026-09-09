@@ -1,51 +1,114 @@
 import os
+import sys
+import json
+import socket
 from pathlib import Path
-from dotenv import load_dotenv
 
-# Paths
-BASE_DIR = Path(__file__).resolve().parent.parent
-APP_DIR = BASE_DIR / "app"
-DATA_DIR = BASE_DIR / "data"
+# Paths — frozen exe vs dev
+if getattr(sys, "frozen", False):
+    BASE_DIR = Path(sys.executable).resolve().parent
+    _INTERNAL = BASE_DIR / "_internal"
+    APP_DIR = _INTERNAL / "app"
+    STATIC_DIR = APP_DIR / "static"
+    TEMPLATES_DIR = APP_DIR / "templates"
+    DATA_DIR = BASE_DIR / "data"
+else:
+    BASE_DIR = Path(__file__).resolve().parent.parent
+    APP_DIR = BASE_DIR / "app"
+    STATIC_DIR = APP_DIR / "static"
+    TEMPLATES_DIR = APP_DIR / "templates"
+    DATA_DIR = BASE_DIR / "data"
+
 DB_PATH = DATA_DIR / "prompts.db"
 JSON_DATA_PATH = DATA_DIR / "cleaned_prompts.json"
 IMAGES_DIR = DATA_DIR / "images"
-STATIC_DIR = APP_DIR / "static"
-TEMPLATES_DIR = APP_DIR / "templates"
+CONFIG_PATH = DATA_DIR / "config.json"
 
-# Server configuration
-HOST = os.getenv("HOST", "127.0.0.1")
-PORT = int(os.getenv("PORT", 8000))
-DEBUG = os.getenv("DEBUG", "True").lower() in ("true", "1", "yes")
+# Server — always random port, localhost only
+HOST = "127.0.0.1"
+DEBUG = not getattr(sys, "frozen", False)
 
-# Dynamic AI Configuration Loader (re-reads .env on demand)
-def get_ai_config():
-    load_dotenv(BASE_DIR / ".env", override=True)
-    provider = os.getenv("AI_PROVIDER", "openai").strip().lower()
-    base_url = os.getenv("AI_BASE_URL", "https://api.openai.com/v1").strip().strip('"').strip("'").rstrip("/")
-    api_key = os.getenv("AI_API_KEY", "").strip().strip('"').strip("'")
-    chat_model = (os.getenv("AI_CHAT_MODEL") or os.getenv("AI_MODEL_NAME", "gpt-4o-mini")).strip().strip('"').strip("'")
-    image_model = (os.getenv("AI_IMAGE_MODEL") or chat_model).strip().strip('"').strip("'")
-    
-    # Gemini Direct Official API
-    gemini_api_key = os.getenv("GEMINI_API_KEY", "").strip().strip('"').strip("'")
-    gemini_chat_model = (os.getenv("GEMINI_CHAT_MODEL") or "gemini-2.5-flash").strip().strip('"').strip("'")
-    gemini_image_model = (os.getenv("GEMINI_IMAGE_MODEL") or "imagen-3.0-generate-002").strip().strip('"').strip("'")
 
-    timeout = int(os.getenv("AI_TIMEOUT", "300"))
-    stream = os.getenv("AI_STREAM", "True").lower() in ("true", "1", "yes")
-    return {
-        "provider": provider,  # 'openai' or 'gemini'
-        "base_url": base_url,
-        "api_key": api_key,
-        "chat_model": chat_model,
-        "model_name": chat_model,  # Giữ alias tương thích
-        "image_model": image_model,
-        "gemini_api_key": gemini_api_key,
-        "gemini_chat_model": gemini_chat_model,
-        "gemini_image_model": gemini_image_model,
-        "timeout": timeout,
-        "stream": stream
-    }
+def find_free_port() -> int:
+    """OS cấp port trống."""
+    s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    s.bind(("127.0.0.1", 0))
+    port = s.getsockname()[1]
+    s.close()
+    return port
+
+
+# ============================================================
+#  Config persistence — JSON file in data/config.json
+# ============================================================
+
+_DEFAULT_CONFIG = {
+    "provider": "openai",       # 'openai' or 'gemini'
+    "base_url": "https://api.openai.com/v1",
+    "api_key": "",
+    "model": "gpt-4o-mini",
+    "gemini_api_key": "",
+    "gemini_model": "gemini-2.5-flash",
+    "timeout": 300,
+    "stream": True,
+    "setup_done": False,
+}
+
+
+def _load_config_file() -> dict:
+    if CONFIG_PATH.exists():
+        try:
+            return json.loads(CONFIG_PATH.read_text("utf-8"))
+        except Exception:
+            pass
+    return {}
+
+
+def _save_config_file(cfg: dict):
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
+    CONFIG_PATH.write_text(json.dumps(cfg, indent=2, ensure_ascii=False), encoding="utf-8")
+
+
+def get_ai_config() -> dict:
+    """Load AI config from config.json, merged with defaults."""
+    saved = _load_config_file()
+    merged = {**_DEFAULT_CONFIG, **saved}
+
+    # Strip whitespace from string values
+    for k in ("provider", "base_url", "api_key", "model", "gemini_api_key", "gemini_model"):
+        if isinstance(merged.get(k), str):
+            merged[k] = merged[k].strip().strip('"').strip("'")
+
+    if merged["provider"] == "openai" and merged.get("base_url"):
+        merged["base_url"] = merged["base_url"].rstrip("/")
+
+    # Backward compat aliases — single model for everything
+    merged["chat_model"] = merged["model"]
+    merged["model_name"] = merged["model"]
+    merged["image_model"] = merged["model"]
+    merged["gemini_chat_model"] = merged["gemini_model"]
+    merged["gemini_image_model"] = merged["gemini_model"]
+    return merged
+
+
+def save_ai_config(cfg: dict):
+    """Save AI config to config.json. Only persists known keys.
+    Empty string for api_key/gemini_api_key means keep existing value."""
+    current = _load_config_file()
+    for k in _DEFAULT_CONFIG:
+        if k in cfg:
+            # Don't overwrite existing keys with empty string
+            if k in ("api_key", "gemini_api_key") and not cfg[k]:
+                continue
+            current[k] = cfg[k]
+    current["setup_done"] = True
+    _save_config_file(current)
+
+
+def is_setup_done() -> bool:
+    cfg = _load_config_file()
+    return cfg.get("setup_done", False)
+
 
 # Ensure required directories exist
 IMAGES_DIR.mkdir(parents=True, exist_ok=True)

@@ -130,14 +130,30 @@ def ensure_database():
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_prompt_tags_tag ON prompt_tags(tag);")
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_prompt_tags_prompt_id ON prompt_tags(prompt_id);")
 
-        # 6. Check if starter tags need to be seeded
+        # 6. Ensure hash & published_at columns for sync
+        if "hash" not in prompt_cols:
+            print("[*] Adding hash column to prompts table...")
+            cursor.execute("ALTER TABLE prompts ADD COLUMN hash TEXT DEFAULT ''")
+        if "published_at" not in prompt_cols:
+            print("[*] Adding published_at column to prompts table...")
+            cursor.execute("ALTER TABLE prompts ADD COLUMN published_at TEXT DEFAULT ''")
+
+        # Ensure sync_meta table for last_synced_at tracking
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS sync_meta (
+                key TEXT PRIMARY KEY,
+                value TEXT NOT NULL
+            )
+        """)
+
+        # 8. Check if starter tags need to be seeded
         cursor.execute("SELECT COUNT(*) as count FROM prompt_tags")
         tags_count = cursor.fetchone().get("count", 0)
         if tags_count == 0:
             print("[*] Seeding starter tags for prompts...")
             _seed_starter_tags(cursor)
 
-        # 7. Check if starter content prompts need to be seeded
+        # 9. Check if starter content prompts need to be seeded
         cursor.execute("SELECT COUNT(*) as count FROM prompts WHERE category = 'content'")
         content_count = cursor.fetchone().get("count", 0)
         if content_count == 0:

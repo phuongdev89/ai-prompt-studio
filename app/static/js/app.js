@@ -2920,7 +2920,7 @@ function setGenProvider(provider, notify = true) {
             btnGemini.className = 'px-3 py-1.5 rounded-lg font-medium transition flex items-center gap-1.5 bg-gradient-to-r from-amber-600 to-orange-600 text-white shadow';
         }
         if (badge) {
-            const imgModel = providerConfigCache?.gemini?.image_model || 'imagen-3.0-generate-002';
+            const imgModel = providerConfigCache?.gemini?.model || 'gemini-2.5-flash';
             badge.innerText = `Google Gemini (${imgModel})`;
             badge.className = 'text-[11px] font-mono px-2 py-0.5 rounded bg-amber-500/10 text-amber-300 border border-amber-500/30';
         }
@@ -2935,7 +2935,7 @@ function setGenProvider(provider, notify = true) {
             btnGemini.className = 'px-3 py-1.5 rounded-lg font-medium transition flex items-center gap-1.5 text-slate-400 hover:text-white';
         }
         if (badge) {
-            const imgModel = providerConfigCache?.openai?.image_model || 'Custom Router';
+            const imgModel = providerConfigCache?.openai?.model || 'Custom Router';
             badge.innerText = `Custom OpenAI (${imgModel})`;
             badge.className = 'text-[11px] font-mono px-2 py-0.5 rounded bg-indigo-500/10 text-indigo-300 border border-indigo-500/30';
         }
@@ -4948,5 +4948,158 @@ async function copyPromptCodeFromChat(promptId) {
     }
 }
 
+// ============================================================
+//  SYNC — Kiểm tra & Tải cập nhật dữ liệu / phần mềm
+// ============================================================
 
+function openSyncModal() {
+    document.getElementById('syncModal').classList.remove('hidden');
+    document.getElementById('syncStatus').innerHTML = '<p class="text-slate-400">Nhấn nút bên dưới để kiểm tra bản cập nhật mới.</p>';
+    document.getElementById('syncPullBtn').classList.add('hidden');
+    document.getElementById('syncCheckBtn').disabled = false;
+}
 
+function closeSyncModal() {
+    document.getElementById('syncModal').classList.add('hidden');
+}
+
+async function doSyncCheck() {
+    const btn = document.getElementById('syncCheckBtn');
+    const status = document.getElementById('syncStatus');
+    const pullBtn = document.getElementById('syncPullBtn');
+    btn.disabled = true;
+    btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin mr-1"></i> Đang kiểm tra...';
+    status.innerHTML = '<p class="text-slate-400 animate-pulse">Đang kết nối tới máy chủ...</p>';
+
+    try {
+        const resp = await fetch('/api/sync/check');
+        const data = await resp.json();
+
+        if (data.error) {
+            status.innerHTML = `<p class="text-red-400"><i class="fa-solid fa-circle-exclamation mr-1"></i> ${data.error}</p>`;
+        } else {
+            let html = '';
+            if (data.has_data) {
+                html += `<p class="text-emerald-400"><i class="fa-solid fa-database mr-1"></i> Có <strong>${data.new_count}</strong> prompt mới!</p>`;
+                pullBtn.classList.remove('hidden');
+            } else {
+                html += '<p class="text-slate-400"><i class="fa-solid fa-check-circle mr-1 text-emerald-500"></i> Dữ liệu đã cập nhật mới nhất.</p>';
+            }
+            if (data.has_app_update) {
+                html += `<p class="text-amber-400 mt-2"><i class="fa-solid fa-arrow-up-from-bracket mr-1"></i> Có phiên bản phần mềm mới: <strong>v${data.latest_version}</strong></p>`;
+                if (data.installer_url) {
+                    html += `<a href="${data.installer_url}" target="_blank" class="inline-block mt-1 text-brand-400 hover:underline text-xs"><i class="fa-solid fa-download mr-1"></i> Tải bộ cài mới</a>`;
+                }
+            }
+            status.innerHTML = html;
+        }
+    } catch (e) {
+        status.innerHTML = `<p class="text-red-400"><i class="fa-solid fa-wifi mr-1"></i> Không thể kết nối. Kiểm tra mạng internet.</p>`;
+    }
+    btn.disabled = false;
+    btn.innerHTML = '<i class="fa-solid fa-magnifying-glass mr-1"></i> Kiểm tra';
+}
+
+async function doSyncPull() {
+    const btn = document.getElementById('syncPullBtn');
+    const status = document.getElementById('syncStatus');
+    btn.disabled = true;
+    btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin mr-1"></i> Đang tải...';
+
+    try {
+        const resp = await fetch('/api/sync/pull', { method: 'POST' });
+        const data = await resp.json();
+
+        if (data.error) {
+            status.innerHTML = `<p class="text-red-400">${data.error}</p>`;
+        } else {
+            let html = `<p class="text-emerald-400"><i class="fa-solid fa-check-circle mr-1"></i> Đã thêm <strong>${data.inserted}</strong> prompt mới!</p>`;
+            if (data.images_queued > 0) {
+                html += `<p class="text-slate-400 text-xs mt-1"><i class="fa-solid fa-image mr-1"></i> ${data.images_queued} ảnh đang tải ngầm...</p>`;
+            }
+            status.innerHTML = html;
+            btn.classList.add('hidden');
+            if (typeof loadPrompts === 'function') loadPrompts();
+            showToast(`Đã cập nhật ${data.inserted} prompt mới!`);
+        }
+    } catch (e) {
+        status.innerHTML = '<p class="text-red-400">Lỗi kết nối khi tải dữ liệu.</p>';
+    }
+    btn.disabled = false;
+    btn.innerHTML = '<i class="fa-solid fa-download mr-1"></i> Tải về';
+}
+
+// ============================================================
+//  SETTINGS — Cấu hình AI trong app
+// ============================================================
+
+let cfgProvider = 'openai';
+
+function openSettingsModal() {
+    document.getElementById('settingsModal').classList.remove('hidden');
+    document.getElementById('cfgMsg').textContent = '';
+    // Load current config
+    fetch('/api/config').then(r => r.json()).then(cfg => {
+        cfgProvider = cfg.provider || 'openai';
+        cfgSwitchProvider(cfgProvider);
+        document.getElementById('cfgBaseUrl').value = cfg.base_url || '';
+        document.getElementById('cfgModel').value = cfg.model || '';
+        document.getElementById('cfgGeminiModel').value = cfg.gemini_model || '';
+        document.getElementById('cfgTimeout').value = cfg.timeout || 300;
+        document.getElementById('cfgApiKey').value = '';
+        document.getElementById('cfgGeminiKey').value = '';
+        document.getElementById('cfgApiKey').placeholder = cfg.has_api_key ? '••••••• (để trống = giữ nguyên)' : 'sk-...';
+        document.getElementById('cfgGeminiKey').placeholder = cfg.has_gemini_key ? '••••••• (để trống = giữ nguyên)' : 'AI...';
+    }).catch(() => {});
+}
+
+function closeSettingsModal() {
+    document.getElementById('settingsModal').classList.add('hidden');
+}
+
+function cfgSwitchProvider(p) {
+    cfgProvider = p;
+    document.getElementById('cfgGrpOpenAI').classList.toggle('hidden', p !== 'openai');
+    document.getElementById('cfgGrpGemini').classList.toggle('hidden', p !== 'gemini');
+    const tabO = document.getElementById('cfgTabOpenAI');
+    const tabG = document.getElementById('cfgTabGemini');
+    if (p === 'openai') {
+        tabO.className = 'flex-1 px-3 py-2 rounded-lg text-xs font-semibold border border-brand-500 text-brand-400 bg-brand-500/10 transition';
+        tabG.className = 'flex-1 px-3 py-2 rounded-lg text-xs font-semibold border border-dark-600 text-slate-400 hover:text-white transition';
+    } else {
+        tabG.className = 'flex-1 px-3 py-2 rounded-lg text-xs font-semibold border border-amber-500 text-amber-400 bg-amber-500/10 transition';
+        tabO.className = 'flex-1 px-3 py-2 rounded-lg text-xs font-semibold border border-dark-600 text-slate-400 hover:text-white transition';
+    }
+}
+
+async function cfgSave() {
+    const msg = document.getElementById('cfgMsg');
+    const payload = {
+        provider: cfgProvider,
+        base_url: document.getElementById('cfgBaseUrl').value.trim(),
+        api_key: document.getElementById('cfgApiKey').value.trim(),
+        model: document.getElementById('cfgModel').value.trim(),
+        gemini_api_key: document.getElementById('cfgGeminiKey').value.trim(),
+        gemini_model: document.getElementById('cfgGeminiModel').value.trim(),
+        timeout: parseInt(document.getElementById('cfgTimeout').value) || 300,
+        stream: true,
+    };
+    try {
+        const resp = await fetch('/api/config', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+        });
+        const data = await resp.json();
+        if (data.ok) {
+            msg.className = 'text-xs text-center min-h-[16px] text-emerald-400';
+            msg.textContent = 'Đã lưu cấu hình thành công!';
+            showToast('Đã lưu cấu hình AI!');
+            // Refresh provider cache
+            if (typeof loadProviderConfig === 'function') loadProviderConfig();
+        }
+    } catch (e) {
+        msg.className = 'text-xs text-center min-h-[16px] text-red-400';
+        msg.textContent = 'Lỗi lưu cấu hình: ' + e.message;
+    }
+}

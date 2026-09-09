@@ -710,15 +710,38 @@ def get_providers_config():
         "openai": {
             "has_key": bool(cfg.get("api_key")),
             "base_url": cfg.get("base_url"),
-            "chat_model": cfg.get("chat_model"),
-            "image_model": cfg.get("image_model")
+            "model": cfg.get("model"),
         },
         "gemini": {
             "has_key": bool(cfg.get("gemini_api_key")),
-            "chat_model": cfg.get("gemini_chat_model", "gemini-2.0-flash"),
-            "image_model": cfg.get("gemini_image_model", "imagen-3.0-generate-002")
+            "model": cfg.get("gemini_model", "gemini-2.5-flash"),
         }
     }
+
+@router.get("/config")
+def get_config():
+    """Trả về cấu hình AI hiện tại (ẩn API key)."""
+    from app.config import get_ai_config, is_setup_done
+    cfg = get_ai_config()
+    return {
+        "provider": cfg.get("provider"),
+        "base_url": cfg.get("base_url"),
+        "has_api_key": bool(cfg.get("api_key")),
+        "model": cfg.get("model"),
+        "has_gemini_key": bool(cfg.get("gemini_api_key")),
+        "gemini_model": cfg.get("gemini_model"),
+        "timeout": cfg.get("timeout"),
+        "stream": cfg.get("stream"),
+        "setup_done": is_setup_done(),
+    }
+
+@router.post("/config")
+async def save_config(request: Request):
+    """Lưu cấu hình AI vào config.json."""
+    from app.config import save_ai_config
+    body = await request.json()
+    save_ai_config(body)
+    return {"ok": True}
 
 @router.get("/tags")
 @router.get("/tags/")
@@ -811,4 +834,20 @@ def assistant_suggestions_endpoint(category: str = "all"):
             "Ảnh chụp sản phẩm đồ uống studio ánh sáng neon"
         ]
     return {"suggestions": suggestions}
+
+# ============================================================
+#  SYNC — Cập nhật dữ liệu & kiểm tra phiên bản phần mềm
+# ============================================================
+
+@router.get("/sync/check")
+async def sync_check():
+    """Kiểm tra có bản cập nhật data/code mới không."""
+    from app.services.sync_manager import check_update
+    return check_update()
+
+@router.post("/sync/pull")
+async def sync_pull():
+    """Kéo dữ liệu prompt mới từ GitHub feed."""
+    from app.services.sync_manager import pull_data
+    return pull_data()
 

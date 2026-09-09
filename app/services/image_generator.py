@@ -166,8 +166,8 @@ def call_gemini_generate_image(
     if not gemini_key:
         return False, None, None, "Chưa cấu hình GEMINI_API_KEY trong tệp .env. Vui lòng nhập API key của Google Gemini vào .env."
 
-    image_model = cfg.get("gemini_image_model", "imagen-3.0-generate-002").strip()
-    chat_model = cfg.get("gemini_chat_model", "gemini-2.0-flash").strip()
+    image_model = cfg.get("gemini_model", "gemini-2.5-flash").strip()
+    chat_model = cfg.get("gemini_model", "gemini-2.5-flash").strip()
     timeout = cfg.get("timeout", 300)
 
     # Map resolution string to Imagen 3 supported aspect ratio
