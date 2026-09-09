@@ -1,4 +1,4 @@
-from fastapi import APIRouter, HTTPException, Query, Request
+from fastapi import APIRouter, HTTPException, Query, Request, Body
 from pydantic import BaseModel, Field
 from typing import Optional, List, Dict, Any
 from app.db.repository import PromptRepository
@@ -9,11 +9,13 @@ router = APIRouter(prefix="/api", tags=["prompts"])
 
 class CreatePromptRequest(BaseModel):
     prompt: str = Field(..., description="Nội dung câu lệnh (JSON hoặc Text)")
+    title: Optional[str] = Field(None, description="Tiêu đề câu lệnh tùy chỉnh")
     media: Optional[str] = Field(None, description="URL hoặc đường dẫn ảnh/video kết quả mẫu")
     images: Optional[List[str]] = Field(None, description="Danh sách URL hoặc Base64 ảnh tải lên từ máy tính")
     category: Optional[str] = Field("image", description="Loại prompt: 'image' hoặc 'content'")
     note: Optional[str] = Field("", description="Ghi chú / chú thích cho câu lệnh")
     sample_content: Optional[str] = Field(None, description="Nội dung kết quả mẫu dạng văn bản")
+    requires_reference: Optional[bool] = Field(None, description="Cờ yêu cầu ảnh tham chiếu (mặc định bật cho prompt ảnh)")
 
 class SetPrimaryFieldRequest(BaseModel):
     is_primary: bool = Field(..., description="Cờ đánh dấu thuộc tính chính")
@@ -34,6 +36,7 @@ class UpdatePromptRequest(BaseModel):
     title: Optional[str] = None
     prompt_code: Optional[str] = None
     note: Optional[str] = None
+    requires_reference: Optional[bool] = None
     fields: Optional[List[Dict[str, Any]]] = None
 
 class ImprovePromptRequest(BaseModel):
@@ -73,6 +76,12 @@ class DeleteImageRequest(BaseModel):
 
 class AddTagRequest(BaseModel):
     tag: str = Field(..., min_length=1, max_length=50, description="Tên thẻ tag cần thêm")
+
+class AssistantChatRequest(BaseModel):
+    message: str = Field(..., description="Nội dung câu hỏi / yêu cầu tìm kiếm của người dùng")
+    history: Optional[List[Dict[str, Any]]] = Field(default_factory=list, description="Lịch sử chat gần nhất")
+    category: Optional[str] = Field("all", description="Bộ lọc danh mục: 'all', 'image' hoặc 'content'")
+    provider: Optional[str] = Field(None, description="Nhà cung cấp AI: 'openai' hoặc 'gemini'")
 
 @router.get("/prompts")
 @router.get("/prompts/")
@@ -125,6 +134,13 @@ def create_prompt(payload: CreatePromptRequest):
         raw_content=payload.prompt,
         raw_media=None
     )
+    if payload.title and payload.title.strip():
+        clean_title = payload.title.strip()
+        parsed_data["title"] = clean_title
+        parsed_data["raw_title"] = clean_title
+        for f in parsed_data.get("fields", []):
+            if f.get("key") == "title":
+                f["value"] = clean_title
     parsed_data["images"] = media_list
     cat = payload.category or "image"
     if cat == "character":
@@ -132,6 +148,10 @@ def create_prompt(payload: CreatePromptRequest):
     parsed_data["category"] = cat
     parsed_data["note"] = payload.note or ""
     parsed_data["sample_content"] = payload.sample_content
+    req_ref = payload.requires_reference
+    if req_ref is None:
+        req_ref = True if cat == "image" else False
+    parsed_data["requires_reference"] = bool(req_ref)
 
     created_item = PromptRepository.create_prompt(parsed_data)
 
@@ -177,8 +197,26 @@ def update_prompt(prompt_id: str, payload: UpdatePromptRequest):
     if payload.note is not None:
         PromptRepository.update_prompt_note(prompt_id=prompt_id, note=payload.note)
         updated = True
+    if payload.requires_reference is not None:
+        PromptRepository.update_prompt_requires_reference(prompt_id=prompt_id, requires_reference=payload.requires_reference)
+        updated = True
 
     return {"status": "success", "updated": updated}
+
+@router.post("/prompts/{prompt_id}/toggle-reference")
+def toggle_prompt_reference_endpoint(prompt_id: str, payload: Dict[str, Any] = Body(default={})):
+    prompt = PromptRepository.get_prompt_by_id(prompt_id)
+    if not prompt:
+        raise HTTPException(status_code=404, detail="Prompt không tồn tại")
+    
+    current_val = bool(prompt.get("requires_reference", False))
+    new_val = bool(payload.get("requires_reference", not current_val))
+    PromptRepository.update_prompt_requires_reference(prompt_id=prompt_id, requires_reference=new_val)
+    return {
+        "status": "success",
+        "requires_reference": new_val,
+        "message": "Đã bật yêu cầu ảnh tham chiếu" if new_val else "Đã tắt yêu cầu ảnh tham chiếu"
+    }
 
 @router.delete("/prompts/{prompt_id}")
 @router.delete("/prompts/{prompt_id}/")
@@ -713,4 +751,64 @@ def delete_prompt_tag(prompt_id: str, tag_name: str):
         raise HTTPException(status_code=404, detail="Prompt không tồn tại")
     tags = PromptRepository.remove_tag_from_prompt(prompt_id, tag_name)
     return {"status": "success", "prompt_id": prompt_id, "tags": tags}
+
+@router.post("/assistant/chat")
+def assistant_chat_endpoint(payload: AssistantChatRequest):
+    """
+    Trợ lý AI tìm kiếm và gợi ý prompt thông minh dựa trên nhu cầu của người dùng.
+    """
+    from app.services.ai_search_assistant import call_ai_search_assistant
+    if not payload.message or not payload.message.strip():
+        raise HTTPException(status_code=400, detail="Vui lòng nhập câu hỏi hoặc yêu cầu tìm kiếm")
+
+    success, result, msg = call_ai_search_assistant(
+        message=payload.message.strip(),
+        history=payload.history or [],
+        category_filter=payload.category or "all",
+        provider=payload.provider
+    )
+
+    if not success:
+        raise HTTPException(status_code=500, detail=msg)
+
+    return {
+        "status": "success",
+        "message": msg,
+        "reply": result.get("assistant_reply", ""),
+        "recommendations": result.get("recommendations", []),
+        "suggested_questions": result.get("suggested_questions", []),
+        "category_filter": result.get("category_filter", "all"),
+        "total_candidates_analyzed": result.get("total_candidates_analyzed", 0)
+    }
+
+@router.get("/assistant/suggestions")
+def assistant_suggestions_endpoint(category: str = "all"):
+    """
+    Trả về danh sách câu hỏi mẫu gợi ý theo danh mục để người dùng bấm nhanh.
+    """
+    if category == "content":
+        suggestions = [
+            "Kịch bản video TikTok 60s KOC review mỹ phẩm mụn",
+            "Kịch bản livestream chốt đơn flash sale dồn dập",
+            "Bài viết blog chuẩn SEO 1500 từ tiếp thị liên kết",
+            "Kịch bản video hài hước tình huống đời sống",
+            "Mẫu kịch bản video unboxing công nghệ"
+        ]
+    elif category == "image":
+        suggestions = [
+            "Chân dung cô gái mặc áo dài vintage chiều thu Hà Nội",
+            "Storyboard 12 ô truyện tranh phong cách anime",
+            "Ảnh chụp sản phẩm đồ uống trong studio ánh sáng neon",
+            "Chân dung nàng thơ điện ảnh Cinematic ngoài trời hoàng hôn",
+            "Ảnh người mẫu thời trang công sở sang trọng đường phố"
+        ]
+    else:
+        suggestions = [
+            "Chân dung cô gái áo dài vintage chiều thu Hà Nội",
+            "Kịch bản video TikTok 60s review mỹ phẩm mờ thâm",
+            "Storyboard 12 ô truyện tranh phong cách anime",
+            "Kịch bản livestream chốt đơn Shopee / TikTok Shop",
+            "Ảnh chụp sản phẩm đồ uống studio ánh sáng neon"
+        ]
+    return {"suggestions": suggestions}
 

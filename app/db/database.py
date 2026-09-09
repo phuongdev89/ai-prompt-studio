@@ -62,6 +62,11 @@ def ensure_database():
         if "note" not in prompt_cols:
             print("[*] Adding note column to prompts table...")
             cursor.execute("ALTER TABLE prompts ADD COLUMN note TEXT DEFAULT ''")
+        if "requires_reference" not in prompt_cols:
+            print("[*] Adding requires_reference column to prompts table...")
+            cursor.execute("ALTER TABLE prompts ADD COLUMN requires_reference INTEGER DEFAULT 0")
+            # Mark all existing image prompts as requiring reference image as requested
+            cursor.execute("UPDATE prompts SET requires_reference = 1 WHERE category = 'image'")
 
         # Migration: convert legacy 'character' category to 'image'
         cursor.execute("UPDATE prompts SET category = 'image' WHERE category = 'character' OR category IS NULL OR category = ''")

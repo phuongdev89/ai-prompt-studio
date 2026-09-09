@@ -29,6 +29,7 @@ class PromptRepository:
                     p.parsed_json,
                     p.category,
                     p.note,
+                    p.requires_reference,
                     p.created_at,
                     (SELECT COUNT(*) FROM images img WHERE img.prompt_id = p.id) as image_count,
                     (SELECT COUNT(*) FROM sample_contents sc WHERE sc.prompt_id = p.id) as sample_count
@@ -129,13 +130,15 @@ class PromptRepository:
         with get_db() as conn:
             cursor = conn.cursor()
             cursor.execute("""
-                SELECT id, original_index, title, raw_title, prompt_type, raw_content, prompt_code, parsed_json, category, note, created_at
+                SELECT id, original_index, title, raw_title, prompt_type, raw_content, prompt_code, parsed_json, category, note, requires_reference, created_at
                 FROM prompts
                 WHERE id = ?
             """, (prompt_id,))
             prompt = cursor.fetchone()
             if not prompt:
                 return None
+
+            prompt["requires_reference"] = bool(prompt.get("requires_reference", 0))
 
             # Parse parsed_json
             if prompt.get("parsed_json"):
@@ -242,6 +245,22 @@ class PromptRepository:
             return True
 
     @staticmethod
+    def update_prompt_note(prompt_id: str, note: str) -> bool:
+        with get_db() as conn:
+            cursor = conn.cursor()
+            cursor.execute("UPDATE prompts SET note = ? WHERE id = ?", (note or "", prompt_id))
+            conn.commit()
+            return True
+
+    @staticmethod
+    def update_prompt_requires_reference(prompt_id: str, requires_reference: bool) -> bool:
+        with get_db() as conn:
+            cursor = conn.cursor()
+            cursor.execute("UPDATE prompts SET requires_reference = ? WHERE id = ?", (1 if requires_reference else 0, prompt_id))
+            conn.commit()
+            return cursor.rowcount > 0
+
+    @staticmethod
     def delete_prompt(prompt_id: str) -> bool:
         with get_db() as conn:
             cursor = conn.cursor()
@@ -334,12 +353,13 @@ class PromptRepository:
             if category == "character":
                 category = "image"
             note = parsed_data.get("note", "")
+            requires_reference = 1 if parsed_data.get("requires_reference") else 0
 
             # Insert prompt
             cursor.execute("""
-                INSERT INTO prompts (id, original_index, title, raw_title, prompt_type, raw_content, prompt_code, parsed_json, category, note)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """, (new_id, new_idx, title, raw_title, prompt_type, raw_content, prompt_code, parsed_json_str, category, note))
+                INSERT INTO prompts (id, original_index, title, raw_title, prompt_type, raw_content, prompt_code, parsed_json, category, note, requires_reference)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, (new_id, new_idx, title, raw_title, prompt_type, raw_content, prompt_code, parsed_json_str, category, note, requires_reference))
 
             # Insert images
             import base64
@@ -708,21 +728,23 @@ class PromptRepository:
             parsed_json_str = json.dumps(parsed_json, ensure_ascii=False) if parsed_json else None
             clean_raw = raw_content if raw_content is not None else prompt_code
 
-            # Inherit category and note from parent
+            # Inherit category, note, and requires_reference from parent
             parent_cat = "image"
             parent_note = ""
+            parent_req_ref = 1
             if parent_prompt_id:
-                cursor.execute("SELECT category, note FROM prompts WHERE id = ?", (parent_prompt_id,))
+                cursor.execute("SELECT category, note, requires_reference FROM prompts WHERE id = ?", (parent_prompt_id,))
                 p_info = cursor.fetchone()
                 if p_info:
                     parent_cat = p_info.get("category") or "image"
                     parent_note = p_info.get("note") or ""
+                    parent_req_ref = p_info.get("requires_reference", 1 if parent_cat == "image" else 0)
 
             # Insert new prompt record
             cursor.execute("""
-                INSERT INTO prompts (id, original_index, title, raw_title, prompt_type, raw_content, prompt_code, parsed_json, category, note)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """, (new_id, new_idx, title, title, prompt_type, clean_raw, prompt_code, parsed_json_str, parent_cat, parent_note))
+                INSERT INTO prompts (id, original_index, title, raw_title, prompt_type, raw_content, prompt_code, parsed_json, category, note, requires_reference)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, (new_id, new_idx, title, title, prompt_type, clean_raw, prompt_code, parsed_json_str, parent_cat, parent_note, parent_req_ref))
 
             # Copy parent images references so new version retains samples
             if parent_prompt_id:

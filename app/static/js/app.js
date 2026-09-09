@@ -218,6 +218,7 @@ function initEventListeners() {
             closeAddMediaModal();
             closeUsePromptModal();
             closeAddSampleModal();
+            closeAiChat();
         } else if (isLightboxOpen) {
             if (e.key === '+' || e.key === '=' || e.code === 'NumpadAdd') {
                 e.preventDefault();
@@ -379,6 +380,9 @@ function initEventListeners() {
             selectPrompt(route.promptId, false);
         }
     });
+
+    // Initialize AI Search Assistant Chat events
+    initAiChatListeners();
 }
 
 // Fetch stats from backend
@@ -808,8 +812,52 @@ function renderDynamicForm(fields) {
     if (allCountBadge) allCountBadge.innerText = (fields || []).length;
     if (featuredCountBadge) featuredCountBadge.innerText = primaryFields.length;
 
+    const isImagePrompt = currentPromptDetail && (currentPromptDetail.category === 'image' || currentPromptDetail.category === 'character');
+    const needsRef = currentPromptDetail && !!currentPromptDetail.requires_reference;
+
+    // 1. Reference toggle header for 'all' tab (only for image prompts)
+    const refToggleHtml = isImagePrompt ? `
+        <div class="p-3 rounded-xl bg-gradient-to-r from-purple-950/30 via-dark-900/80 to-dark-900/60 border border-purple-500/25 hover:border-purple-500/40 transition flex items-center justify-between gap-3 mb-2">
+            <div class="flex items-center gap-2.5 min-w-0">
+                <div class="w-8 h-8 rounded-lg bg-purple-500/15 text-purple-400 flex items-center justify-center flex-shrink-0 border border-purple-500/20">
+                    <i class="fa-solid fa-camera-retro text-xs"></i>
+                </div>
+                <div class="min-w-0">
+                    <div class="text-xs font-semibold text-slate-200 flex items-center gap-1.5">
+                        <span>Cần ảnh tham chiếu</span>
+                        <span class="text-[9px] font-mono px-1.5 py-0.5 rounded bg-purple-500/15 text-purple-300 border border-purple-500/25">Reference Image</span>
+                    </div>
+                    <p class="text-[11px] text-slate-400 truncate">Bật nếu câu lệnh này cần dùng ảnh mẫu khi tạo ảnh với AI</p>
+                </div>
+            </div>
+            <label class="relative inline-flex items-center cursor-pointer flex-shrink-0" title="Bật/tắt yêu cầu ảnh tham chiếu">
+                <input type="checkbox" id="toggleRequiresReferenceInput" onchange="togglePromptRequiresReference(this.checked)" class="sr-only peer" ${needsRef ? 'checked' : ''}>
+                <div class="w-9 h-5 bg-dark-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-purple-600"></div>
+            </label>
+        </div>
+    ` : '';
+
+    // 2. Reference notice banner for 'featured' tab (displayed when requires_reference is ON)
+    const refBannerHtml = (isImagePrompt && needsRef) ? `
+        <div class="p-3 rounded-xl bg-gradient-to-r from-purple-950/40 via-purple-900/20 to-dark-900/60 border border-purple-500/35 text-purple-200 text-xs flex items-start gap-2.5 shadow-sm mb-2">
+            <div class="w-6 h-6 rounded-lg bg-purple-500/20 text-purple-300 flex items-center justify-center flex-shrink-0 mt-0.5 border border-purple-500/30">
+                <i class="fa-solid fa-camera-retro text-[11px]"></i>
+            </div>
+            <div class="flex-1 min-w-0">
+                <div class="font-bold text-purple-300 flex items-center gap-1.5">
+                    <span>Yêu cầu ảnh tham chiếu (Reference Image)</span>
+                    <span class="text-[9px] font-mono font-medium px-1.5 py-0.5 rounded bg-purple-500/20 text-purple-200 border border-purple-500/30">Bắt buộc</span>
+                </div>
+                <p class="text-slate-300 text-[11px] mt-0.5 leading-relaxed">
+                    Prompt này yêu cầu có ảnh mẫu tham chiếu. Hãy chuẩn bị hoặc sử dụng ảnh mẫu đi kèm khi tạo ảnh với AI.
+                </p>
+            </div>
+        </div>
+    ` : '';
+
     if (!fields || fields.length === 0) {
         formEl.innerHTML = `
+            ${currentTab === 'all' ? refToggleHtml : refBannerHtml}
             <div class="p-6 text-center text-slate-500 text-xs">
                 <i class="fa-solid fa-list-check text-xl mb-1 text-slate-600"></i>
                 <p>Không có trường tham số động cho câu lệnh này.</p>
@@ -823,6 +871,7 @@ function renderDynamicForm(fields) {
         displayedFields = primaryFields;
         if (displayedFields.length === 0) {
             formEl.innerHTML = `
+                ${refBannerHtml}
                 <div class="p-8 text-center text-slate-400 text-xs space-y-3">
                     <i class="fa-regular fa-star text-2xl text-amber-400/80 mb-1"></i>
                     <p class="font-semibold text-slate-200">Chưa có thuộc tính chính nào được đánh dấu</p>
@@ -843,7 +892,7 @@ function renderDynamicForm(fields) {
         }
     }
 
-    formEl.innerHTML = displayedFields.map((field) => {
+    const fieldsHtml = displayedFields.map((field) => {
         const val = formState[field.path] !== undefined ? formState[field.path] : field.value;
         const isTextarea = field.type === 'textarea' || (val && val.length > 50);
         const isPrimary = !!field.is_primary;
@@ -877,6 +926,34 @@ function renderDynamicForm(fields) {
             </div>
         `;
     }).join('');
+
+    const topHeader = currentTab === 'all' ? refToggleHtml : refBannerHtml;
+    formEl.innerHTML = topHeader + fieldsHtml;
+}
+
+async function togglePromptRequiresReference(newStatus) {
+    if (!currentPromptId) return;
+    try {
+        const res = await fetch(`/api/prompts/${currentPromptId}/toggle-reference`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ requires_reference: !!newStatus })
+        });
+        if (!res.ok) throw new Error('Không thể cập nhật yêu cầu ảnh tham chiếu');
+        const data = await res.json();
+        if (currentPromptDetail) {
+            currentPromptDetail.requires_reference = data.requires_reference;
+            renderDynamicForm(currentPromptDetail.fields || []);
+        }
+        showToast(data.message || (newStatus ? 'Đã bật yêu cầu ảnh tham chiếu 📸' : 'Đã tắt yêu cầu ảnh tham chiếu'));
+    } catch (err) {
+        console.error('Error toggling requires_reference:', err);
+        showToast('Lỗi khi cập nhật yêu cầu ảnh tham chiếu');
+        const toggleEl = document.getElementById('toggleRequiresReferenceInput');
+        if (toggleEl && currentPromptDetail) {
+            toggleEl.checked = !!currentPromptDetail.requires_reference;
+        }
+    }
 }
 
 async function toggleFieldPrimary(fieldId, newStatus) {
@@ -1382,6 +1459,10 @@ function openCreateModal() {
         setCreateMediaTab('upload');
         const mediaInput = document.getElementById('newMediaInput');
         if (mediaInput) mediaInput.value = '';
+        const titleInput = document.getElementById('newPromptTitleInput');
+        if (titleInput) titleInput.value = '';
+        const reqRefInput = document.getElementById('newPromptRequiresRefInput');
+        if (reqRefInput) reqRefInput.checked = true;
         const noteInput = document.getElementById('newNoteInput');
         if (noteInput) noteInput.value = '';
         const sampleInput = document.getElementById('newSampleContentInput');
@@ -1389,7 +1470,6 @@ function openCreateModal() {
         const promptInput = document.getElementById('newPromptInput');
         if (promptInput) {
             promptInput.value = '';
-            promptInput.focus();
         }
 
         const charWrapper = document.getElementById('createCharacterMediaWrapper');
@@ -1398,9 +1478,12 @@ function openCreateModal() {
             if (currentNavTab === 'content') {
                 charWrapper.classList.add('hidden');
                 contentWrapper.classList.remove('hidden');
+                if (promptInput) promptInput.focus();
             } else {
                 charWrapper.classList.remove('hidden');
                 contentWrapper.classList.add('hidden');
+                if (titleInput) titleInput.focus();
+                else if (promptInput) promptInput.focus();
             }
         }
     }
@@ -1418,12 +1501,15 @@ async function submitCreatePrompt(event) {
     if (event && typeof event.preventDefault === 'function') {
         event.preventDefault();
     }
+    const titleInput = document.getElementById('newPromptTitleInput');
     const mediaInput = document.getElementById('newMediaInput');
+    const reqRefInput = document.getElementById('newPromptRequiresRefInput');
     const promptInput = document.getElementById('newPromptInput');
     const noteInput = document.getElementById('newNoteInput');
     const sampleInput = document.getElementById('newSampleContentInput');
     const submitBtn = document.getElementById('submitCreateBtn');
 
+    const titleVal = titleInput ? titleInput.value.trim() : '';
     const promptVal = promptInput ? promptInput.value.trim() : '';
     const mediaVal = mediaInput ? mediaInput.value.trim() : '';
     const noteVal = noteInput ? noteInput.value.trim() : '';
@@ -1445,12 +1531,17 @@ async function submitCreatePrompt(event) {
             category: currentNavTab
         };
 
+        if (titleVal) {
+            payload.title = titleVal;
+        }
+
         if (currentNavTab === 'content') {
             if (noteVal) payload.note = noteVal;
             if (sampleVal) payload.sample_content = sampleVal;
         } else {
             payload.media = mediaVal;
             payload.images = uploadedBase64List;
+            payload.requires_reference = reqRefInput ? reqRefInput.checked : true;
         }
 
         const res = await fetch('/api/prompts', {
@@ -1467,7 +1558,9 @@ async function submitCreatePrompt(event) {
         const newPrompt = await res.json();
         
         // Reset form & close modal
+        if (titleInput) titleInput.value = '';
         if (mediaInput) mediaInput.value = '';
+        if (reqRefInput) reqRefInput.checked = true;
         if (promptInput) promptInput.value = '';
         if (noteInput) noteInput.value = '';
         if (sampleInput) sampleInput.value = '';
@@ -4246,5 +4339,614 @@ function updateSidebarImageCount(promptId, count) {
         imgBadge.remove();
     }
 }
+
+// ==========================================
+// AI Assistant Search & Recommendation Chat Module
+// ==========================================
+let isAiChatOpen = false;
+let aiChatCategory = 'all'; // 'all' | 'image' | 'content'
+let aiChatHistory = [];
+let isAiChatLoading = false;
+
+function initAiChatListeners() {
+    const chatInput = document.getElementById('aiChatInput');
+    if (chatInput) {
+        chatInput.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter' && !e.shiftKey) {
+                e.preventDefault();
+                sendAiChatMessage();
+            }
+        });
+
+        chatInput.addEventListener('input', () => {
+            chatInput.style.height = 'auto';
+            chatInput.style.height = Math.min(chatInput.scrollHeight, 96) + 'px';
+        });
+    }
+
+    // Auto-close on mobile when clicking outside
+    document.addEventListener('click', (e) => {
+        const widget = document.getElementById('aiChatWidget');
+        const fab = document.getElementById('aiAssistantFab');
+        if (isAiChatOpen && widget && fab && !widget.contains(e.target) && !fab.contains(e.target)) {
+            if (window.innerWidth < 640) {
+                closeAiChat();
+            }
+        }
+    });
+
+    // Try restoring conversation from sessionStorage
+    try {
+        const saved = sessionStorage.getItem('ai_chat_history');
+        if (saved) {
+            aiChatHistory = JSON.parse(saved);
+        }
+    } catch (e) {}
+}
+
+function toggleAiChat() {
+    if (isAiChatOpen) {
+        closeAiChat();
+    } else {
+        openAiChat();
+    }
+}
+
+function openAiChat() {
+    const widget = document.getElementById('aiChatWidget');
+    const fabIcon = document.getElementById('aiFabIcon');
+    if (!widget) return;
+
+    isAiChatOpen = true;
+    widget.classList.remove('hidden');
+
+    if (fabIcon) {
+        fabIcon.className = 'fa-solid fa-xmark';
+    }
+
+    // Render messages or welcome if empty
+    const messagesEl = document.getElementById('aiChatMessages');
+    if (messagesEl) {
+        if (!aiChatHistory || aiChatHistory.length === 0) {
+            renderAiChatWelcome();
+        } else if (messagesEl.children.length === 0) {
+            renderAllChatHistory();
+        }
+    }
+
+    const input = document.getElementById('aiChatInput');
+    if (input) {
+        setTimeout(() => input.focus(), 100);
+    }
+    scrollAiChatToBottom();
+}
+
+function closeAiChat() {
+    const widget = document.getElementById('aiChatWidget');
+    const fabIcon = document.getElementById('aiFabIcon');
+    if (!widget) return;
+
+    isAiChatOpen = false;
+    widget.classList.add('hidden');
+
+    if (fabIcon) {
+        fabIcon.className = 'fa-solid fa-wand-magic-sparkles';
+    }
+}
+
+function setAiChatCategory(cat) {
+    aiChatCategory = cat;
+    const btnAll = document.getElementById('aiCatAll');
+    const btnImg = document.getElementById('aiCatImage');
+    const btnCnt = document.getElementById('aiCatContent');
+    const badge = document.getElementById('aiChatCandidatesBadge');
+
+    const activeClasses = 'px-2 py-0.5 rounded font-semibold transition bg-brand-600 text-white shadow-xs';
+    const inactiveClasses = 'px-2 py-0.5 rounded font-medium text-slate-400 hover:text-white transition';
+
+    if (btnAll) btnAll.className = cat === 'all' ? activeClasses : inactiveClasses;
+    if (btnImg) btnImg.className = cat === 'image' ? activeClasses : inactiveClasses;
+    if (btnCnt) btnCnt.className = cat === 'content' ? activeClasses : inactiveClasses;
+
+    if (badge) {
+        if (cat === 'image') badge.innerText = '351 prompt ảnh';
+        else if (cat === 'content') badge.innerText = '88 prompt content';
+        else badge.innerText = '439 prompts sẵn sàng';
+    }
+
+    // If chat is showing only welcome, refresh quick chips
+    if (aiChatHistory.length === 0) {
+        renderAiChatWelcome();
+    }
+}
+
+function clearAiChat() {
+    aiChatHistory = [];
+    try {
+        sessionStorage.removeItem('ai_chat_history');
+    } catch (e) {}
+
+    const input = document.getElementById('aiChatInput');
+    if (input) {
+        input.value = '';
+        input.style.height = 'auto';
+    }
+
+    renderAiChatWelcome();
+    showToast('Đã làm mới cuộc trò chuyện AI!');
+}
+
+function renderAiChatWelcome() {
+    const messagesEl = document.getElementById('aiChatMessages');
+    if (!messagesEl) return;
+
+    let chips = [];
+    if (aiChatCategory === 'content') {
+        chips = [
+            'Kịch bản video TikTok 60s KOC review mỹ phẩm',
+            'Kịch bản livestream chốt đơn flash sale dồn dập',
+            'Bài viết blog chuẩn SEO 1500 từ tiếp thị liên kết',
+            'Kịch bản video hài hước tình huống đời sống'
+        ];
+    } else if (aiChatCategory === 'image') {
+        chips = [
+            'Chân dung cô gái áo dài vintage chiều thu Hà Nội',
+            'Storyboard 12 ô truyện tranh phong cách anime',
+            'Ảnh chụp sản phẩm đồ uống studio ánh sáng neon',
+            'Chân dung nàng thơ điện ảnh Cinematic ngoài trời'
+        ];
+    } else {
+        chips = [
+            'Chân dung cô gái áo dài vintage chiều thu Hà Nội',
+            'Kịch bản video TikTok 60s review mỹ phẩm mờ thâm',
+            'Storyboard 12 ô truyện tranh phong cách anime',
+            'Kịch bản livestream chốt đơn Shopee / TikTok Shop'
+        ];
+    }
+
+    messagesEl.innerHTML = `
+        <div class="space-y-3 animate-fade-in">
+            <div class="flex items-start gap-2.5">
+                <div class="w-7 h-7 rounded-xl bg-gradient-to-tr from-indigo-600 to-brand-500 flex items-center justify-center text-white flex-shrink-0 text-xs shadow-md shadow-indigo-500/20">
+                    <i class="fa-solid fa-wand-magic-sparkles text-amber-300"></i>
+                </div>
+                <div class="bg-dark-800 border border-dark-700/80 rounded-2xl rounded-tl-sm p-3.5 space-y-2 text-slate-200 leading-relaxed shadow-sm max-w-[92%]">
+                    <p class="font-bold text-white text-xs flex items-center gap-1.5">
+                        <span>Xin chào! Tôi là Trợ Lý AI Tìm Prompt</span>
+                        <span class="text-[10px] px-1.5 py-0.2 rounded bg-brand-500/20 text-brand-400 border border-brand-500/30">Online</span>
+                    </p>
+                    <p class="text-slate-300 text-[11px] leading-relaxed">
+                        Bạn đang cần tạo hình ảnh hay viết kịch bản gì nhưng không nhớ nổi tên câu lệnh? Hãy mô tả ý tưởng hoặc mục đích bằng ngôn ngữ tự nhiên, tôi sẽ quét toàn bộ kho dữ liệu, gợi ý prompt phù hợp nhất và chấm điểm độ phù hợp cho bạn!
+                    </p>
+                    <div class="pt-2 space-y-1.5 border-t border-dark-700/60">
+                        <span class="text-[10px] font-semibold uppercase tracking-wider text-indigo-400 block flex items-center gap-1">
+                            <i class="fa-solid fa-bolt text-amber-400"></i>
+                            <span>Bấm để hỏi nhanh:</span>
+                        </span>
+                        <div class="flex flex-wrap gap-1.5">
+                            ${chips.map(chip => `
+                                <button type="button" onclick="sendAiChatMessage('${escapeHtml(chip).replace(/'/g, "\\'")}')"
+                                        class="px-2.5 py-1 rounded-xl bg-dark-900 hover:bg-dark-750 text-slate-300 hover:text-white border border-dark-700 hover:border-indigo-500/40 text-[11px] transition text-left flex items-center gap-1.5 active:scale-95 shadow-xs">
+                                    <i class="fa-solid fa-magnifying-glass text-[9px] text-indigo-400"></i>
+                                    <span>${escapeHtml(chip)}</span>
+                                </button>
+                            `).join('')}
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    `;
+}
+
+function renderAllChatHistory() {
+    const messagesEl = document.getElementById('aiChatMessages');
+    if (!messagesEl) return;
+    messagesEl.innerHTML = '';
+
+    aiChatHistory.forEach(item => {
+        if (item.role === 'user') {
+            appendUserMessageToUI(item.content);
+        } else {
+            appendAssistantMessageToUI(item.content, item.recommendations, item.suggested_questions);
+        }
+    });
+}
+
+function appendUserMessageToUI(content) {
+    const messagesEl = document.getElementById('aiChatMessages');
+    if (!messagesEl) return;
+
+    const div = document.createElement('div');
+    div.className = 'flex justify-end';
+    div.innerHTML = `
+        <div class="max-w-[85%] bg-gradient-to-r from-indigo-600 to-purple-600 text-white rounded-2xl rounded-tr-sm px-3.5 py-2.5 text-xs shadow-md shadow-indigo-600/15 leading-relaxed break-words">
+            ${escapeHtml(content)}
+        </div>
+    `;
+    messagesEl.appendChild(div);
+}
+
+function formatAiMarkdown(text) {
+    if (!text) return '';
+    let s = escapeHtml(text);
+
+    // Bold **text**
+    s = s.replace(/\*\*(.*?)\*\*/g, '<strong class="text-white font-semibold">$1</strong>');
+    
+    // Italic *text*
+    s = s.replace(/\*(.*?)\*/g, '<em class="text-slate-300 italic">$1</em>');
+
+    // Inline code `code`
+    s = s.replace(/`([^`]+)`/g, '<code class="px-1.5 py-0.5 rounded bg-dark-900 text-amber-300 font-mono text-[10px] border border-dark-700">$1</code>');
+
+    // Bullet list: lines starting with "- " or "* "
+    s = s.replace(/(?:^|\n)[-*]\s+(.+)/g, '<div class="flex items-start gap-1.5 my-1"><span class="text-indigo-400 mt-0.5">•</span><span>$1</span></div>');
+
+    // Numbered list: lines starting with "1. ", "2. "
+    s = s.replace(/(?:^|\n)(\d+)\.\s+(.+)/g, '<div class="flex items-start gap-1.5 my-1"><span class="font-mono text-indigo-400 font-bold">$1.</span><span>$2</span></div>');
+
+    // Newlines
+    s = s.replace(/\n\n+/g, '<div class="h-2"></div>');
+    s = s.replace(/\n/g, '<br>');
+
+    return s;
+}
+
+function renderPromptRecommendationCard(rec) {
+    const score = rec.match_score || 90;
+    let scoreBadge = '';
+    if (score >= 90) {
+        scoreBadge = `<span class="px-2 py-0.5 rounded-full text-[10px] font-bold font-mono bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 flex items-center gap-1"><i class="fa-solid fa-circle-check text-[9px]"></i>${score}% Rất phù hợp</span>`;
+    } else if (score >= 75) {
+        scoreBadge = `<span class="px-2 py-0.5 rounded-full text-[10px] font-bold font-mono bg-cyan-500/20 text-cyan-300 border border-cyan-500/40 flex items-center gap-1"><i class="fa-solid fa-check text-[9px]"></i>${score}% Phù hợp</span>`;
+    } else {
+        scoreBadge = `<span class="px-2 py-0.5 rounded-full text-[10px] font-bold font-mono bg-amber-500/20 text-amber-300 border border-amber-500/40 flex items-center gap-1">${score}% Tham khảo</span>`;
+    }
+
+    const isContent = rec.category === 'content';
+    const catBadge = isContent
+        ? `<span class="text-[9px] font-mono px-1.5 py-0.2 rounded bg-cyan-500/15 text-cyan-400 border border-cyan-500/30 flex items-center gap-1"><i class="fa-solid fa-file-lines text-[8px]"></i>Content</span>`
+        : `<span class="text-[9px] font-mono px-1.5 py-0.2 rounded bg-amber-500/15 text-amber-400 border border-amber-500/30 flex items-center gap-1"><i class="fa-solid fa-image text-[8px]"></i>Image</span>`;
+
+    const thumbnailHtml = rec.thumbnail ? `
+        <div class="w-14 h-14 rounded-xl overflow-hidden bg-dark-900 border border-dark-700 flex-shrink-0 cursor-pointer hover:opacity-90 transition" onclick="navigateToPromptFromChat('${rec.id}', '${rec.category}')">
+            <img src="${rec.thumbnail}" alt="Thumbnail" class="w-full h-full object-cover">
+        </div>
+    ` : '';
+
+    return `
+        <div class="bg-dark-900/90 border border-dark-700 hover:border-indigo-500/50 rounded-xl p-3 space-y-2.5 transition-all duration-200 shadow-sm hover:shadow-indigo-500/5 group/card">
+            <!-- Header: Cat & Score -->
+            <div class="flex items-center justify-between gap-2">
+                <div class="flex items-center gap-1.5">
+                    <span class="text-[10px] font-mono font-semibold text-slate-400 bg-dark-800 px-1.5 py-0.5 rounded border border-dark-750">#${escapeHtml(rec.id)}</span>
+                    ${catBadge}
+                </div>
+                ${scoreBadge}
+            </div>
+
+            <!-- Title & Thumbnail -->
+            <div class="flex items-start gap-2.5">
+                ${thumbnailHtml}
+                <div class="flex-1 min-w-0">
+                    <h4 onclick="navigateToPromptFromChat('${rec.id}', '${rec.category}')"
+                        class="font-bold text-white text-xs leading-snug hover:text-brand-400 cursor-pointer transition line-clamp-2">
+                        ${escapeHtml(rec.title)}
+                    </h4>
+                    ${rec.tags && rec.tags.length > 0 ? `
+                        <div class="flex flex-wrap gap-1 mt-1.5">
+                            ${rec.tags.map(t => `<span class="text-[9px] px-1.5 py-0.2 rounded bg-dark-800 text-slate-400 border border-dark-750">#${escapeHtml(t)}</span>`).join('')}
+                        </div>
+                    ` : ''}
+                </div>
+            </div>
+
+            <!-- Reason Box -->
+            ${rec.reason ? `
+                <div class="bg-dark-850 border border-dark-750 rounded-lg p-2 text-[11px] text-slate-300 leading-relaxed">
+                    <div class="text-indigo-400 font-semibold mb-0.5 flex items-center gap-1 text-[10px]">
+                        <i class="fa-solid fa-lightbulb text-amber-400"></i>
+                        <span>Tại sao nên dùng:</span>
+                    </div>
+                    <div>${escapeHtml(rec.reason)}</div>
+                </div>
+            ` : ''}
+
+            <!-- Adjustments Box -->
+            ${rec.recommended_adjustments ? `
+                <div class="bg-indigo-950/20 border border-indigo-500/20 rounded-lg p-2 text-[11px] text-indigo-200/90 leading-relaxed">
+                    <div class="text-indigo-400 font-semibold mb-0.5 flex items-center gap-1 text-[10px]">
+                        <i class="fa-solid fa-sliders text-cyan-400"></i>
+                        <span>Gợi ý tùy chỉnh tham số:</span>
+                    </div>
+                    <div>${escapeHtml(rec.recommended_adjustments)}</div>
+                </div>
+            ` : ''}
+
+            <!-- Action Buttons -->
+            <div class="flex items-center gap-2 pt-1 border-t border-dark-800">
+                <button type="button" onclick="navigateToPromptFromChat('${rec.id}', '${rec.category}')"
+                        class="flex-1 py-1.5 px-2.5 rounded-lg bg-gradient-to-r from-brand-600 to-emerald-600 hover:from-brand-500 hover:to-emerald-500 text-white font-semibold text-[11px] flex items-center justify-center gap-1.5 transition shadow shadow-brand-600/15 active:scale-95">
+                    <i class="fa-solid fa-arrow-up-right-from-square text-[10px]"></i>
+                    <span>Mở trong Studio</span>
+                </button>
+                <button type="button" onclick="copyPromptCodeFromChat('${rec.id}')"
+                        title="Sao chép toàn bộ Prompt này"
+                        class="py-1.5 px-2.5 rounded-lg bg-dark-800 hover:bg-dark-750 text-slate-300 hover:text-white border border-dark-700 text-[11px] flex items-center justify-center gap-1.5 transition active:scale-95">
+                    <i class="fa-regular fa-copy text-[11px]"></i>
+                    <span>Sao chép</span>
+                </button>
+            </div>
+        </div>
+    `;
+}
+
+function appendAssistantMessageToUI(replyText, recommendations = [], suggestedQuestions = []) {
+    const messagesEl = document.getElementById('aiChatMessages');
+    if (!messagesEl) return;
+
+    const div = document.createElement('div');
+    div.className = 'flex items-start gap-2.5 animate-fade-in';
+
+    let recsHtml = '';
+    if (recommendations && recommendations.length > 0) {
+        recsHtml = `
+            <div class="space-y-2.5 pt-1">
+                <div class="flex items-center justify-between text-[11px] font-bold text-white border-b border-dark-700/60 pb-1.5">
+                    <span class="flex items-center gap-1.5 text-indigo-400">
+                        <i class="fa-solid fa-ranking-star text-amber-400"></i>
+                        <span>Gợi ý ${recommendations.length} câu lệnh tốt nhất:</span>
+                    </span>
+                    <span class="text-[10px] text-slate-400 font-normal">Chấm điểm theo yêu cầu</span>
+                </div>
+                <div class="space-y-2">
+                    ${recommendations.map(r => renderPromptRecommendationCard(r)).join('')}
+                </div>
+            </div>
+        `;
+    }
+
+    let questionsHtml = '';
+    if (suggestedQuestions && suggestedQuestions.length > 0) {
+        questionsHtml = `
+            <div class="pt-2 border-t border-dark-700/60 space-y-1.5">
+                <span class="text-[10px] font-semibold text-slate-400 block flex items-center gap-1">
+                    <i class="fa-regular fa-comments text-indigo-400"></i>
+                    <span>Gợi ý bước tiếp theo:</span>
+                </span>
+                <div class="flex flex-wrap gap-1.5">
+                    ${suggestedQuestions.map(q => `
+                        <button type="button" onclick="sendAiChatMessage('${escapeHtml(q).replace(/'/g, "\\'")}')"
+                                class="px-2.5 py-1 rounded-full bg-dark-900 hover:bg-dark-750 text-indigo-300 hover:text-white border border-indigo-500/25 hover:border-indigo-500/50 text-[10px] transition text-left flex items-center gap-1 active:scale-95">
+                            <i class="fa-solid fa-arrow-turn-down fa-rotate-90 text-[8px] text-indigo-400"></i>
+                            <span>${escapeHtml(q)}</span>
+                        </button>
+                    `).join('')}
+                </div>
+            </div>
+        `;
+    }
+
+    div.innerHTML = `
+        <div class="w-7 h-7 rounded-xl bg-gradient-to-tr from-indigo-600 to-brand-500 flex items-center justify-center text-white flex-shrink-0 text-xs shadow-md shadow-indigo-500/20 mt-0.5">
+            <i class="fa-solid fa-wand-magic-sparkles text-amber-300"></i>
+        </div>
+        <div class="bg-dark-800 border border-dark-700/80 rounded-2xl rounded-tl-sm p-3.5 space-y-3 text-slate-200 leading-relaxed shadow-sm max-w-[92%] break-words text-xs">
+            <div class="text-slate-200 leading-relaxed font-sans">${formatAiMarkdown(replyText)}</div>
+            ${recsHtml}
+            ${questionsHtml}
+        </div>
+    `;
+
+    messagesEl.appendChild(div);
+}
+
+async function sendAiChatMessage(customText = null) {
+    if (isAiChatLoading) return;
+
+    const input = document.getElementById('aiChatInput');
+    const message = (customText || (input ? input.value : '')).trim();
+    if (!message) return;
+
+    if (input) {
+        input.value = '';
+        input.style.height = 'auto';
+    }
+
+    // Append to UI
+    appendUserMessageToUI(message);
+
+    // Save to history
+    aiChatHistory.push({ role: 'user', content: message });
+    try {
+        sessionStorage.setItem('ai_chat_history', JSON.stringify(aiChatHistory));
+    } catch (e) {}
+
+    scrollAiChatToBottom();
+
+    // Show loading indicator
+    isAiChatLoading = true;
+    const typingEl = document.getElementById('aiChatTyping');
+    const sendBtn = document.getElementById('btnSendAiChat');
+    if (typingEl) typingEl.classList.remove('hidden');
+    if (sendBtn) {
+        sendBtn.disabled = true;
+        sendBtn.innerHTML = '<i class="fa-solid fa-circle-notch fa-spin text-xs"></i>';
+    }
+
+    try {
+        // Clean history to send only role and string text, avoiding sending nested arrays/objects
+        const cleanHistory = (aiChatHistory || [])
+            .slice(0, -1)
+            .filter(item => item && item.content && typeof item.content === 'string')
+            .map(item => ({
+                role: item.role === 'user' ? 'user' : 'assistant',
+                content: item.content
+            }))
+            .slice(-6);
+
+        const payload = {
+            message: message,
+            history: cleanHistory,
+            category: aiChatCategory
+        };
+
+        const res = await fetch('/api/assistant/chat', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+        });
+
+        if (!res.ok) {
+            const err = await res.json().catch(() => ({}));
+            let errMsg = 'Lỗi máy chủ khi xử lý yêu cầu AI';
+            if (err && err.detail) {
+                if (typeof err.detail === 'string') {
+                    errMsg = err.detail;
+                } else if (Array.isArray(err.detail)) {
+                    errMsg = err.detail.map(d => (d && d.msg) ? d.msg : JSON.stringify(d)).join('; ');
+                } else if (typeof err.detail === 'object') {
+                    errMsg = JSON.stringify(err.detail);
+                }
+            }
+            throw new Error(errMsg);
+        }
+
+        const data = await res.json();
+        const reply = data.reply || 'Dưới đây là các câu lệnh phù hợp nhất:';
+        const recs = data.recommendations || [];
+        const questions = data.suggested_questions || [];
+
+        // Save assistant message to history
+        aiChatHistory.push({
+            role: 'assistant',
+            content: reply,
+            recommendations: recs,
+            suggested_questions: questions
+        });
+        try {
+            sessionStorage.setItem('ai_chat_history', JSON.stringify(aiChatHistory));
+        } catch (e) {}
+
+        // Render assistant message to UI
+        appendAssistantMessageToUI(reply, recs, questions);
+
+    } catch (err) {
+        console.error('AI chat error:', err);
+        const messagesEl = document.getElementById('aiChatMessages');
+        if (messagesEl) {
+            const errDiv = document.createElement('div');
+            errDiv.className = 'flex items-start gap-2.5 animate-fade-in';
+            errDiv.innerHTML = `
+                <div class="w-7 h-7 rounded-xl bg-rose-500/20 text-rose-400 flex items-center justify-center flex-shrink-0 text-xs border border-rose-500/30">
+                    <i class="fa-solid fa-triangle-exclamation"></i>
+                </div>
+                <div class="bg-dark-800 border border-rose-500/30 rounded-2xl rounded-tl-sm p-3 text-rose-300 text-xs leading-relaxed max-w-[90%]">
+                    <p class="font-bold text-white mb-1">Không thể nhận phản hồi từ AI</p>
+                    <p class="text-[11px] text-slate-300">${escapeHtml(err.message)}</p>
+                    <button type="button" onclick="sendAiChatMessage('${escapeHtml(message).replace(/'/g, "\\'")}')"
+                            class="mt-2 px-2.5 py-1 rounded bg-rose-600/30 hover:bg-rose-600/50 text-rose-200 border border-rose-500/40 text-[10px] flex items-center gap-1 transition">
+                        <i class="fa-solid fa-rotate-right"></i>
+                        <span>Thử lại</span>
+                    </button>
+                </div>
+            `;
+            messagesEl.appendChild(errDiv);
+        }
+    } finally {
+        isAiChatLoading = false;
+        if (typingEl) typingEl.classList.add('hidden');
+        if (sendBtn) {
+            sendBtn.disabled = false;
+            sendBtn.innerHTML = '<i class="fa-solid fa-paper-plane text-xs"></i>';
+        }
+        scrollAiChatToBottom();
+        if (input) input.focus();
+    }
+}
+
+function scrollAiChatToBottom() {
+    const messagesEl = document.getElementById('aiChatMessages');
+    if (messagesEl) {
+        setTimeout(() => {
+            messagesEl.scrollTop = messagesEl.scrollHeight;
+        }, 50);
+    }
+}
+
+function navigateToPromptFromChat(promptId, targetCategory) {
+    if (!promptId) return;
+
+    // Check if category switch is needed
+    if (targetCategory && (targetCategory === 'image' || targetCategory === 'content') && targetCategory !== currentNavTab) {
+        switchNavTab(targetCategory, promptId, true);
+    } else {
+        selectPrompt(promptId, true);
+    }
+
+    showToast(`Đã mở câu lệnh #${promptId} trong Studio!`);
+
+    // On mobile devices, close chat to let user interact with the studio workspace
+    if (window.innerWidth < 768) {
+        closeAiChat();
+    }
+}
+
+async function copyPromptCodeFromChat(promptId) {
+    if (!promptId) return;
+
+    let promptCode = '';
+
+    // First check in currentPromptDetail if it's already active
+    if (currentPromptDetail && currentPromptDetail.id === promptId) {
+        promptCode = currentPromptDetail.prompt_code || currentPromptDetail.raw_content || '';
+    }
+
+    // Next check in currentPromptsList
+    if (!promptCode && currentPromptsList) {
+        const found = currentPromptsList.find(p => p.id === promptId);
+        if (found) {
+            promptCode = found.prompt_code || found.raw_content || '';
+        }
+    }
+
+    // If still not found, fetch from API
+    if (!promptCode) {
+        try {
+            const res = await fetch(`/api/prompts/${promptId}`);
+            if (res.ok) {
+                const data = await res.json();
+                promptCode = data.prompt_code || data.raw_content || '';
+            }
+        } catch (e) {
+            console.error('Fetch prompt to copy failed:', e);
+        }
+    }
+
+    if (promptCode) {
+        try {
+            await navigator.clipboard.writeText(promptCode);
+            showToast(`Đã sao chép prompt #${promptId} vào bộ nhớ tạm!`);
+        } catch (err) {
+            try {
+                const ta = document.createElement('textarea');
+                ta.value = promptCode;
+                ta.style.position = 'fixed';
+                ta.style.opacity = '0';
+                document.body.appendChild(ta);
+                ta.select();
+                document.execCommand('copy');
+                document.body.removeChild(ta);
+                showToast(`Đã sao chép prompt #${promptId}!`);
+            } catch (e2) {
+                showToast('Không thể sao chép tự động, vui lòng chọn và sao chép thủ công.');
+            }
+        }
+    } else {
+        showToast('Không thể lấy nội dung câu lệnh để sao chép.');
+    }
+}
+
 
 
