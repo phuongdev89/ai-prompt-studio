@@ -46,10 +46,6 @@ version_file = os.path.join(ROOT_DIR, '.version')
 if os.path.exists(version_file):
     datas.append((version_file, '.'))
 
-# .env.example as fallback
-env_example = os.path.join(ROOT_DIR, '.env.example')
-if os.path.exists(env_example):
-    datas.append((env_example, '.'))
 
 # Optional certifi bundle
 try:

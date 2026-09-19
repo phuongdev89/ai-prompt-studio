@@ -1190,6 +1190,53 @@ async function convertPromptToJsonAI() {
     }
 }
 
+async function extractJsonFromCurrentImage() {
+    if (!currentPromptId || !currentPromptDetail) return;
+
+    const sliderImg = document.getElementById('currentSliderImg');
+    if (!sliderImg || sliderImg.classList.contains('hidden') || !sliderImg.src) {
+        showToast('Không tìm thấy ảnh hiện tại để phân tích.');
+        return;
+    }
+
+    const imgUrl = sliderImg.src;
+
+    const btn = document.getElementById('btnExtractJsonFromImg');
+    if (btn) {
+        btn.disabled = true;
+        btn.innerHTML = '<i class="fa-solid fa-circle-notch fa-spin text-indigo-200"></i> <span>Đang phân tích...</span>';
+    }
+    showToast('Đang gọi AI phân tích ảnh để lấy JSON gốc...');
+
+    try {
+        const res = await fetch(`/api/prompts/${currentPromptId}/extract-json-from-image`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ image: imgUrl })
+        });
+
+        const data = await res.json();
+        if (!res.ok) {
+            throw new Error(data.detail || 'Lỗi khi trích xuất JSON từ ảnh');
+        }
+
+        showToast(data.message || 'Tạo prompt mới thành công!');
+
+        // Refresh stats & list, select newly created prompt
+        await fetchStats();
+        await loadPrompts(data.prompt.id);
+
+    } catch (err) {
+        console.error('Extract JSON from image error:', err);
+        showToast(`Lỗi: ${err.message}`);
+    } finally {
+        if (btn) {
+            btn.disabled = false;
+            btn.innerHTML = '<i class="fa-solid fa-code text-[11px] text-indigo-200"></i><span>Lấy json từ ảnh này</span>';
+        }
+    }
+}
+
 async function deleteCurrentPrompt() {
     if (!currentPromptId || !currentPromptDetail) return;
 
@@ -1864,14 +1911,9 @@ function lightboxDownloadImg() {
     const img = document.getElementById('lightboxImg');
     if (!img || !img.src) return;
 
-    const a = document.createElement('a');
-    a.href = img.src;
-    const filename = img.src.split('/').pop().split('?')[0] || 'prompt-image.jpg';
-    a.download = filename;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    showToast(`Đang tải ảnh: ${filename}`);
+    const rawSrc = img.src;
+    const filename = rawSrc.split('/').pop().split('?')[0] || `image_${Date.now()}.png`;
+    triggerDirectDownload(rawSrc, filename);
 }
 
 function showToast(msg) {
@@ -3272,48 +3314,82 @@ async function submitGenerateImage() {
     }
 }
 
-async function downloadCurrentGeneratedImage() {
-    if (!currentGeneratedImageData) {
-        showToast('Chưa có dữ liệu ảnh để tải về.');
+async function triggerDirectDownload(urlOrDataUri, defaultFilename = 'download_image.png') {
+    if (!urlOrDataUri) return;
+
+    // Desktop app (pywebview): use native Save-As dialog
+    if (window.pywebview && window.pywebview.api && window.pywebview.api.save_file) {
+        let dataUri = urlOrDataUri;
+        // If not a data URI, fetch and convert to data URI
+        if (!urlOrDataUri.startsWith('data:')) {
+            try {
+                const res = await fetch(urlOrDataUri);
+                const blob = await res.blob();
+                dataUri = await new Promise(resolve => {
+                    const reader = new FileReader();
+                    reader.onloadend = () => resolve(reader.result);
+                    reader.readAsDataURL(blob);
+                });
+            } catch (err) {
+                showToast('Lỗi khi tải ảnh: ' + err.message);
+                return;
+            }
+        }
+        try {
+            const result = await window.pywebview.api.save_file(defaultFilename, dataUri);
+            if (result) {
+                showToast(`Đã lưu ảnh: ${result}`);
+            }
+        } catch (err) {
+            showToast('Lỗi khi lưu: ' + err.message);
+        }
         return;
     }
 
-    const filename = `${currentPromptId || 'prompt'}_ai_${Date.now()}.png`;
-
-    if (currentGeneratedImageData.startsWith('data:')) {
+    // Browser: standard download
+    if (urlOrDataUri.startsWith('data:')) {
         const a = document.createElement('a');
-        a.href = currentGeneratedImageData;
-        a.download = filename;
+        a.href = urlOrDataUri;
+        a.download = defaultFilename;
         document.body.appendChild(a);
         a.click();
         document.body.removeChild(a);
-        showToast(`Đã tải ảnh về: ${filename}`);
+        showToast(`Đã tải ảnh về: ${defaultFilename}`);
         return;
     }
 
     try {
         showToast('Đang tải ảnh về máy...');
-        const res = await fetch(currentGeneratedImageData);
+        const res = await fetch(urlOrDataUri);
         const blob = await res.blob();
         const blobUrl = URL.createObjectURL(blob);
         const a = document.createElement('a');
         a.href = blobUrl;
-        a.download = filename;
+        a.download = defaultFilename;
         document.body.appendChild(a);
         a.click();
         document.body.removeChild(a);
-        URL.revokeObjectURL(blobUrl);
-        showToast(`Đã lưu ảnh về máy: ${filename}`);
+        setTimeout(() => URL.revokeObjectURL(blobUrl), 1000);
+        showToast(`Đã lưu ảnh về máy: ${defaultFilename}`);
     } catch (err) {
         const a = document.createElement('a');
-        a.href = currentGeneratedImageData;
+        a.href = urlOrDataUri;
         a.target = '_blank';
-        a.download = filename;
+        a.download = defaultFilename;
         document.body.appendChild(a);
         a.click();
         document.body.removeChild(a);
         showToast('Đang mở ảnh để tải về...');
     }
+}
+
+async function downloadCurrentGeneratedImage() {
+    if (!currentGeneratedImageData) {
+        showToast('Chưa có dữ liệu ảnh để tải về.');
+        return;
+    }
+    const filename = `${currentPromptId || 'prompt'}_ai_${Date.now()}.png`;
+    await triggerDirectDownload(currentGeneratedImageData, filename);
 }
 
 async function saveGeneratedImageToRecord() {

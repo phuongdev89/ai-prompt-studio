@@ -1,6 +1,6 @@
 @echo off
 REM ========================================================
-REM   BUILD PATCH UPDATE - AI PROMPT STUDIO
+REM   BUILD PATCH UPDATE - AI PROMPT STUDIO (Inno Setup)
 REM ========================================================
 cd /d "%~dp0\.."
 title AI Prompt Studio - Build Patch
@@ -44,19 +44,29 @@ if %ERRORLEVEL% neq 0 (
 )
 
 echo.
-echo [2/2] Tao bo cai Patch voi NSIS...
-set "NSIS_PATH="
-if exist "C:\Program Files (x86)\NSIS\makensis.exe" (
-    set "NSIS_PATH=C:\Program Files (x86)\NSIS\makensis.exe"
-) else if exist "C:\Program Files\NSIS\makensis.exe" (
-    set "NSIS_PATH=C:\Program Files\NSIS\makensis.exe"
+echo [2/2] Tao bo cai Patch voi Inno Setup...
+set "ISCC_PATH="
+if exist "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" set "ISCC_PATH=C:\Program Files (x86)\Inno Setup 6\ISCC.exe"
+if not defined ISCC_PATH (
+    if exist "C:\Program Files\Inno Setup 6\ISCC.exe" set "ISCC_PATH=C:\Program Files\Inno Setup 6\ISCC.exe"
+)
+if not defined ISCC_PATH (
+    if exist "C:\Program Files (x86)\Inno Setup 5\ISCC.exe" set "ISCC_PATH=C:\Program Files (x86)\Inno Setup 5\ISCC.exe"
 )
 
-if defined NSIS_PATH (
-    "%NSIS_PATH%" installer\patch.nsi
-    echo [OK] Da tao file Patch EXE thanh cong!
+if defined ISCC_PATH (
+    "%ISCC_PATH%" installer\patch.iss
+    if %ERRORLEVEL% equ 0 (
+        echo [OK] Da tao file Patch EXE thanh cong!
+    ) else (
+        echo [ERROR] Inno Setup bien dich that bai!
+        pause
+        exit /b 1
+    )
 ) else (
-    echo [SKIP] Khong tim thay NSIS.
+    echo [ERROR] Khong tim thay Inno Setup!
+    pause
+    exit /b 1
 )
 
 echo.

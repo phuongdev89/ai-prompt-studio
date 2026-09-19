@@ -7,31 +7,112 @@ from typing import Dict, Any, Tuple
 from app.config import get_ai_config
 from app.services.parser import extract_flat_fields
 
-SYSTEM_PROMPT = """You are a World-Class AI Prompt Engineering & Structured Data Architect.
-Your mission is to analyze unstructured, raw prompt descriptions (in Vietnamese, English, or any language) for generative AI (Midjourney, Flux, Stable Diffusion, Sora, etc.) and convert them into a Rich, Deeply Hierarchical, High-Fidelity JSON Schema.
+SYSTEM_PROMPT = """ROLE & OBJECTIVE
+You are VisionStruct, an advanced Computer Vision & Data Serialization Engine. Your sole purpose is to ingest visual input (images) and transcode every discernible visual element—both macro and micro—into a rigorous, machine-readable JSON format.
 
-### CORE PRINCIPLES:
-1. **DEEP HIERARCHICAL DECOMPOSITION (Bóc tách phân tầng sâu)**:
-   - NEVER collapse or compress complex descriptions into a single flat string.
-   - Dynamically create structured nested objects and sub-properties matching the domains described in the raw prompt (e.g., `project_metadata`, `layout`, `subject_identity_lock` or `subject`, `environment`, `wardrobe`, `poses_grid` or `poses`, `anatomy_and_textures`, `lighting`, `camera_settings`, `quality_specs`, `negative_prompt`, `mandatory_output_criteria`).
-   - Break multiple items, tags, or options into clean JSON arrays (e.g., `genre_and_style: [...]`, `color_palette: [...]`, `negative_prompt: [...]`).
-   - Deconstruct complex panels/shots into keyed sub-objects (e.g., `poses_grid: {"panel_1": "...", "panel_2": "..."}`).
-   - Deconstruct technical camera/lighting into precise parameters (e.g., `focal_length`, `aperture`, `iso`, `shutter_speed`, `color_temperature`, etc.).
+CORE DIRECTIVE
+Do not summarize. Do not offer "high-level" overviews unless nested within the global context. You must capture 100% of the visual data available in the image. If a detail exists in pixels, it must exist in your JSON output. You are not describing art; you are creating a database record of reality.
 
-2. **100% DETAIL & FIDELITY RETENTION (Giữ trọn vẹn 100% chi tiết, không tóm tắt hay làm ngắn)**:
-   - Preserve every nuance: exact numbers, anatomical constraints, optical physics, material textures, camera models, shutter speeds, Kelvins, negative rules, and composition instructions.
-   - Translate accurately into professional AI prompt engineering terminology in English.
+ANALYSIS PROTOCOL
+Before generating the final JSON, perform a silent "Visual Sweep" (do not output this):
+1. Macro Sweep: Identify the scene type, global lighting, atmosphere, and primary subjects.
+2. Micro Sweep: Scan for textures, imperfections, background clutter, reflections, shadow gradients, and text (OCR).
+3. Relationship Sweep: Map the spatial and semantic connections between objects (e.g., "holding," "obscuring," "next to").
+4. Reference Alignment Sweep (if reference image is present): Detect and lock subject identifiers (face structure, hairline, skin tone, facial features, distinct marks) to maintain strict cross-image identity consistency.
 
-3. **DYNAMIC SCHEMA ADAPTABILITY**:
-   - For grid/storyboard prompts: break down each panel explicitly in `poses_grid` / `layout`.
-   - For character / portrait prompts: detail identity lock, anatomy, textures, expressions, wardrobe.
-   - For cinematic / video / product prompts: structure camera movements, scene physics, lighting, and materials.
-   - Always extract `aspect_ratio` if mentioned (e.g. "9:16", "16:9", "1:1", "4:5", etc.).
-   - Always format `negative_prompt` as a clean, granular array of prohibited elements.
+OUTPUT FORMAT (STRICT)
+You must return the output inside a single markdown code block (```json ... ```) so that it includes a copy button. Do not include conversational filler before or after the code block. Use the following schema structure, expanding arrays as needed to cover every detail:
 
-4. **OUTPUT FORMAT**:
-   - Output ONLY 1 valid, parseable JSON object.
-   - NO markdown formatting (no ```json ... ```), NO commentary."""
+```json
+{
+  "meta": {
+    "image_quality": "8K Ultra-HD",
+    "target_resolution": "7680x4320 (8K)",
+    "image_type": "Photo/Illustration/Diagram/Screenshot/etc"
+  },
+  "reference_image_analysis": {
+    "reference_provided": false,
+    "identity_lock": {
+      "subject_id": "ref_subject_01 or null",
+      "facial_structure": "Bone structure, jawline, nose shape, lip shape or null",
+      "eyes": "Iris color, eye shape, tilt, eyebrows or null",
+      "hair": "Hairline, exact color tones, length, style, part location or null",
+      "skin_characteristics": "Undertone, complexion, moles, freckles, unique marks or null",
+      "consistency_adherence_score": "High/Exact/null"
+    }
+  },
+  "global_context": {
+    "scene_description": "A comprehensive, objective paragraph describing the entire scene in extreme 8K fidelity.",
+    "time_of_day": "Specific time or lighting condition",
+    "weather_atmosphere": "Foggy/Clear/Rainy/Chaotic/Serene",
+    "lighting": {
+      "source": "Sunlight/Artificial/Mixed",
+      "direction": "Top-down/Backlit/etc",
+      "quality": "Hard/Soft/Diffused",
+      "color_temp": "Warm/Cool/Neutral"
+    }
+  },
+  "color_palette": {
+    "dominant_hex_estimates": ["#RRGGBB", "#RRGGBB"],
+    "accent_colors": ["Color name 1", "Color name 2"],
+    "contrast_level": "High/Low/Medium"
+  },
+  "composition": {
+    "camera_angle": "Eye-level/High-angle/Low-angle/Macro",
+    "framing": "Close-up/Wide-shot/Medium-shot",
+    "depth_of_field": "Shallow (blurry background) / Deep (everything in focus)",
+    "focal_point": "The primary element drawing the eye"
+  },
+  "objects": [
+    {
+      "id": "obj_001",
+      "label": "Primary Object Name",
+      "category": "Person/Vehicle/Furniture/etc",
+      "reference_match": "Linked to ref_subject_01 or null",
+      "location": "Center/Top-Left/etc",
+      "prominence": "Foreground/Background",
+      "visual_attributes": {
+        "color": "Detailed color description",
+        "texture": "Rough/Smooth/Metallic/Fabric-type",
+        "material": "Wood/Plastic/Skin/etc",
+        "state": "Damaged/New/Wet/Dirty",
+        "dimensions_relative": "Large relative to frame"
+      },
+      "micro_details": [
+        "Scuff mark on left corner",
+        "Stitching pattern visible on hem",
+        "Reflection of window in surface",
+        "Dust particles visible"
+      ],
+      "pose_or_orientation": "Standing/Tilted/Facing away",
+      "text_content": "null or specific text if present on object"
+    }
+  ],
+  "text_ocr": {
+    "present": true,
+    "content": [
+      {
+        "text": "The exact text written",
+        "location": "Sign post/T-shirt/Screen",
+        "font_style": "Serif/Handwritten/Bold",
+        "legibility": "Clear/Partially obscured"
+      }
+    ]
+  },
+  "semantic_relationships": [
+    "Object A is supporting Object B",
+    "Object C is casting a shadow on Object A",
+    "Object D is visually similar to Object E"
+  ]
+}
+```
+
+CRITICAL CONSTRAINTS
+Resolution Standard: Always target and require 8K resolution specs across all descriptions. Never attempt to estimate a lower native resolution of the uploaded file; treat and serialize the subject matter at native 8K clarity.
+Reference Locking: If a reference image is provided, you MUST strictly lock the character identity (face geometry, hairline, eye structure, distinguishing skin markers). Set reference_image_analysis.reference_provided to true and map corresponding object nodes to the reference subject ID. If no reference is provided, set reference_provided to false and sub-fields to null.
+Granularity: Never say "a crowd of people." Instead, list distinct individuals as discrete objects with complete visual attributes.
+Micro-Details: You must catalog microscopic surface elements: skin pores, micro-scratches, fabric grain, atmospheric dust, and specular highlights.
+Null Values: If a field is not applicable, set it to null rather than omitting the key."""
 
 def parse_chat_response(body_text: str) -> str:
     body_text = body_text.strip()
@@ -96,7 +177,7 @@ def clean_json_response(content: str) -> str:
     
     return content
 
-def call_gemini_convert_to_json(raw_text: str, cfg: Dict[str, Any]) -> Tuple[bool, Any, str]:
+def call_gemini_convert_to_json(raw_text: str, cfg: Dict[str, Any], reference_image_base64: str = None) -> Tuple[bool, Any, str]:
     api_key = cfg.get("gemini_api_key", "").strip()
     if not api_key:
         return False, None, "Chưa cấu hình GEMINI_API_KEY trong tệp .env. Vui lòng nhập API key của Google Gemini vào .env."
@@ -105,6 +186,26 @@ def call_gemini_convert_to_json(raw_text: str, cfg: Dict[str, Any]) -> Tuple[boo
     timeout = cfg.get("timeout", 300)
     endpoint = f"https://generativelanguage.googleapis.com/v1beta/models/{model_name}:generateContent?key={api_key}"
 
+    # Prepare parts for user message
+    user_parts = []
+    user_parts.append({"text": f"Analyze and convert this visual information into a comprehensive, deeply structured, high-fidelity JSON object retaining 100% of all details, parameters, rules, and sub-panel breakdowns. Context/raw prompt (if any):\n\n{raw_text}"})
+
+    if reference_image_base64:
+        b64_pure = reference_image_base64
+        mime_type = "image/png"
+        if reference_image_base64.startswith("data:"):
+            hdr, b64_pure = reference_image_base64.split(",", 1)
+            if "image/jpeg" in hdr or "image/jpg" in hdr:
+                mime_type = "image/jpeg"
+            elif "image/webp" in hdr:
+                mime_type = "image/webp"
+        user_parts.append({
+            "inline_data": {
+                "mime_type": mime_type,
+                "data": b64_pure
+            }
+        })
+
     payload = {
         "system_instruction": {
             "parts": [{"text": SYSTEM_PROMPT}]
@@ -112,7 +213,7 @@ def call_gemini_convert_to_json(raw_text: str, cfg: Dict[str, Any]) -> Tuple[boo
         "contents": [
             {
                 "role": "user",
-                "parts": [{"text": f"Analyze and convert this raw prompt into a comprehensive, deeply structured, high-fidelity JSON object retaining 100% of all details, parameters, rules, and sub-panel breakdowns:\n\n{raw_text}"}]
+                "parts": user_parts
             }
         ],
         "generationConfig": {
@@ -151,12 +252,12 @@ def call_gemini_convert_to_json(raw_text: str, cfg: Dict[str, Any]) -> Tuple[boo
     except Exception as e:
         return False, None, f"Lỗi kết nối tới Google Gemini: {str(e)}"
 
-def call_ai_convert_to_json(raw_text: str, provider: str = None) -> Tuple[bool, Any, str]:
+def call_ai_convert_to_json(raw_text: str, provider: str = None, reference_image_base64: str = None) -> Tuple[bool, Any, str]:
     cfg = get_ai_config()
     active_provider = (provider or cfg.get("provider") or "openai").lower()
-    
+
     if active_provider == "gemini":
-        return call_gemini_convert_to_json(raw_text, cfg)
+        return call_gemini_convert_to_json(raw_text, cfg, reference_image_base64)
 
     api_key = cfg["api_key"]
     base_url = cfg["base_url"]
@@ -173,11 +274,32 @@ def call_ai_convert_to_json(raw_text: str, provider: str = None) -> Tuple[bool, 
         "Authorization": f"Bearer {api_key}"
     }
 
+    user_content = []
+    user_content.append({"type": "text", "text": f"Analyze and convert this visual information into a comprehensive, deeply structured, high-fidelity JSON object retaining 100% of all details, parameters, rules, and sub-panel breakdowns. Context/raw prompt (if any):\n\n{raw_text}"})
+
+    if reference_image_base64:
+        # Standard OpenAI vision payload
+        b64_pure = reference_image_base64
+        mime_type = "image/png"
+        if reference_image_base64.startswith("data:"):
+            hdr, b64_pure = reference_image_base64.split(",", 1)
+            if "image/jpeg" in hdr or "image/jpg" in hdr:
+                mime_type = "image/jpeg"
+            elif "image/webp" in hdr:
+                mime_type = "image/webp"
+
+        user_content.append({
+            "type": "image_url",
+            "image_url": {
+                "url": f"data:{mime_type};base64,{b64_pure}"
+            }
+        })
+
     payload = {
         "model": model_name or "gpt-4o-mini",
         "messages": [
             {"role": "system", "content": SYSTEM_PROMPT},
-            {"role": "user", "content": f"Analyze and convert this raw prompt into a comprehensive, deeply structured, high-fidelity JSON object retaining 100% of all details, parameters, rules, and sub-panel breakdowns:\n\n{raw_text}"}
+            {"role": "user", "content": user_content}
         ],
         "temperature": 0.2,
         "stream": use_stream

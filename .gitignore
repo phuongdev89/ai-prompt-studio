@@ -1,10 +1,51 @@
+# Environment & Secrets
 .env
-.idea
-.agents
+.env.*
+!.env.example
+
+# Python
 __pycache__/
 *.py[cod]
 *$py.class
-*.tmp
-*.bak
+*.so
+.Python
+env/
+venv/
+.venv/
+ENV/
+
+# Build & Dist
+build/
+dist/
+*.spec
+*.spec.log
+
+# IDE & Editors
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS Junk
+Thumbs.db
+Desktop.ini
+ehthumbs.db
+.DS_Store
+
+# User Runtime Data (keep structure, ignore personal DB/config/images)
+data/config.json
+data/prompts.db
 data/prompts.db-shm
 data/prompts.db-wal
+data/images/*
+!data/images/.gitkeep
+!data/cleaned_prompts.json
+
+# Temporary files
+*.tmp
+*.bak
+*.log
+
+# Agents
+.agents/
+.claude

@@ -4,6 +4,10 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>AI Prompt Studio - Quản lý & Tùy biến Câu lệnh Prompt</title>
+    <!-- Favicon -->
+    <link rel="icon" type="image/x-icon" href="/static/favicon.ico">
+    <link rel="icon" type="image/png" sizes="32x32" href="/static/favicon.png">
+    <link rel="apple-touch-icon" href="/static/favicon.png">
     <!-- Tailwind CSS CDN -->
     <script src="https://cdn.tailwindcss.com"></script>
     <script>
@@ -340,10 +344,16 @@
                                 <i class="fa-solid fa-chevron-right"></i>
                             </button>
                             
-                            <!-- Fullscreen button overlay -->
-                            <button id="sliderExpandBtn" onclick="openLightbox(document.getElementById('currentSliderImg').src)" class="absolute bottom-3 right-3 px-2.5 py-1.5 rounded-lg bg-dark-900/80 hover:bg-dark-900 text-xs text-slate-300 hover:text-white backdrop-blur shadow transition">
-                                <i class="fa-solid fa-expand mr-1"></i> Phóng to
-                            </button>
+                            <!-- Action buttons overlay -->
+                            <div class="absolute bottom-3 right-3 flex items-center gap-2">
+                                <button id="btnExtractJsonFromImg" onclick="extractJsonFromCurrentImage()" class="px-2.5 py-1.5 rounded-lg bg-indigo-600/90 hover:bg-indigo-600 text-xs text-white font-medium backdrop-blur shadow-lg shadow-indigo-600/30 transition flex items-center gap-1.5 active:scale-95" title="Gọi AI phân tích ảnh này để lấy JSON gốc và tạo prompt mới">
+                                    <i class="fa-solid fa-code text-[11px] text-indigo-200"></i>
+                                    <span>Lấy json từ ảnh này</span>
+                                </button>
+                                <button id="sliderExpandBtn" onclick="openLightbox(document.getElementById('currentSliderImg').src)" class="px-2.5 py-1.5 rounded-lg bg-dark-900/80 hover:bg-dark-900 text-xs text-slate-300 hover:text-white backdrop-blur shadow transition">
+                                    <i class="fa-solid fa-expand mr-1"></i> Phóng to
+                                </button>
+                            </div>
                         </div>
 
                         <!-- Thumbnails Row -->

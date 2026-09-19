@@ -52,6 +52,10 @@ class SaveImprovedPromptRequest(BaseModel):
     parsed_json: Optional[Dict[str, Any]] = None
     fields: Optional[List[Dict[str, Any]]] = None
 
+class ExtractJsonFromImageRequest(BaseModel):
+    image: str = Field(..., description="Base64 hoặc URL của ảnh cần trích xuất JSON VisionStruct")
+    provider: Optional[str] = Field(None, description="Nhà cung cấp: 'openai' hoặc 'gemini'")
+
 class GenerateImageRequest(BaseModel):
     prompt: str = Field(..., description="Nội dung câu lệnh tạo ảnh")
     reference_image: Optional[str] = Field(None, description="Chuỗi Base64 hoặc URL ảnh tham chiếu")
@@ -370,6 +374,91 @@ def convert_prompt_to_json(prompt_id: str):
     # Return refreshed prompt
     refreshed = PromptRepository.get_prompt_by_id(prompt_id)
     return refreshed
+
+@router.post("/prompts/{prompt_id}/extract-json-from-image")
+def extract_json_from_image_endpoint(prompt_id: str, payload: ExtractJsonFromImageRequest):
+    import json
+    import base64
+    from pathlib import Path
+    from app.services.ai_converter import call_ai_convert_to_json
+    from app.config import IMAGES_DIR
+
+    prompt = PromptRepository.get_prompt_by_id(prompt_id)
+    if not prompt:
+        raise HTTPException(status_code=404, detail="Prompt không tồn tại")
+
+    img_src = payload.image.strip()
+    b64_image_data = None
+
+    if img_src.startswith("data:image/"):
+        b64_image_data = img_src
+    elif img_src.startswith("/media/") or img_src.startswith("media/"):
+        fname = img_src.split("/")[-1]
+        local_file = IMAGES_DIR / fname
+        if local_file.exists():
+            mime = "image/png"
+            if fname.lower().endswith((".jpg", ".jpeg")):
+                mime = "image/jpeg"
+            elif fname.lower().endswith(".webp"):
+                mime = "image/webp"
+            with open(local_file, "rb") as f:
+                b64_str = base64.b64encode(f.read()).decode("utf-8")
+                b64_image_data = f"data:{mime};base64,{b64_str}"
+    elif img_src.startswith("http://") or img_src.startswith("https://"):
+        try:
+            import urllib.request, ssl
+            ctx = ssl.create_default_context()
+            ctx.check_hostname = False
+            ctx.verify_mode = ssl.CERT_NONE
+            req = urllib.request.Request(img_src, headers={"User-Agent": "Mozilla/5.0"})
+            with urllib.request.urlopen(req, timeout=30, context=ctx) as resp:
+                data = resp.read()
+                mime = resp.headers.get_content_type() or "image/png"
+                b64_str = base64.b64encode(data).decode("utf-8")
+                b64_image_data = f"data:{mime};base64,{b64_str}"
+        except Exception:
+            pass
+
+    if not b64_image_data:
+        raise HTTPException(status_code=400, detail="Không thể đọc dữ liệu hình ảnh để xử lý")
+
+    raw_text = prompt.get("raw_content") or prompt.get("prompt_code") or ""
+    success, parsed_json, msg = call_ai_convert_to_json(
+        raw_text=raw_text,
+        provider=payload.provider,
+        reference_image_base64=b64_image_data
+    )
+
+    if not success:
+        raise HTTPException(status_code=500, detail=msg)
+
+    prompt_code = json.dumps(parsed_json, indent=2, ensure_ascii=False)
+    original_title = prompt.get("title") or "Prompt"
+    new_title = f"{original_title} - json gốc"
+
+    # Tạo một prompt mới kế thừa ảnh này
+    parsed_prompt_data = {
+        "title": new_title,
+        "raw_title": new_title,
+        "prompt_type": "json",
+        "parsed_json": parsed_json,
+        "prompt_code": prompt_code,
+        "raw_content": prompt_code,
+        "category": "image",
+        "images": [b64_image_data],
+        "requires_reference": True,
+        "note": prompt.get("note", "")
+    }
+
+    created_prompt = PromptRepository.create_prompt(parsed_prompt_data)
+    if not created_prompt:
+        raise HTTPException(status_code=500, detail="Không thể tạo prompt mới từ kết quả phân tích JSON")
+
+    return {
+        "status": "success",
+        "message": "Đã tạo prompt mới với JSON gốc từ ảnh thành công!",
+        "prompt": created_prompt
+    }
 
 @router.post("/prompts/{prompt_id}/improve")
 def improve_prompt_endpoint(prompt_id: str, payload: ImprovePromptRequest):

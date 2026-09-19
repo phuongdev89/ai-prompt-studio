@@ -216,6 +216,29 @@ async function doStart() {{
 </html>"""
 
 
+class Api:
+    """Exposed to JS via window.pywebview.api"""
+    def __init__(self, win_ref):
+        self._win = win_ref
+
+    def save_file(self, filename, data_uri):
+        """Open native Save-As dialog and write binary data."""
+        import base64
+        win = self._win[0]
+        result = win.create_file_dialog(
+            webview.SAVE_DIALOG,
+            save_filename=filename,
+        )
+        if not result:
+            return False
+        path = result if isinstance(result, str) else result[0]
+        # data_uri: "data:image/png;base64,xxxxx"
+        header, b64 = data_uri.split(",", 1)
+        with open(path, "wb") as f:
+            f.write(base64.b64decode(b64))
+        return path
+
+
 def main():
     from app.config import find_free_port, is_setup_done
 
@@ -235,6 +258,10 @@ def main():
 
     _IS_FROZEN = getattr(sys, "frozen", False)
 
+    # Holder for window reference (Api needs it before window is assigned)
+    win_ref = [None]
+    api = Api(win_ref)
+
     window = webview.create_window(
         title="AI Prompt Studio",
         url=start_url if start_url else None,
@@ -244,7 +271,9 @@ def main():
         min_size=(900, 600) if start_url else (520, 600),
         resizable=True,
         text_select=True,
+        js_api=api,
     )
+    win_ref[0] = window
 
     if start_url:
         # Already configured — maximize on start
@@ -259,8 +288,12 @@ def main():
                 window.maximize()
         window.events.loaded += _on_loaded
 
-    # debug=True only in dev, never in production exe
-    webview.start(gui="edgechromium", debug=not _IS_FROZEN)
+    webview.start(gui="edgechromium", debug=False)
+
+    # Cleanup PID file on exit
+    pid_file = ROOT_DIR / ".server.pid"
+    if pid_file.exists():
+        pid_file.unlink(missing_ok=True)
 
 
 if __name__ == "__main__":

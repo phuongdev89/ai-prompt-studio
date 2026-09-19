@@ -17,7 +17,7 @@ from app.db.database import get_db
 # ponytail: hardcode GitHub raw URL; upgrade to env/config when multi-repo needed
 FEED_URL = os.getenv(
     "SYNC_FEED_URL",
-    "https://raw.githubusercontent.com/YOUR_USER/ai_prompts_database/main/prompts_feed.json",
+    "https://raw.githubusercontent.com/phuongdev89/ai-prompt-studio/main/prompts_feed.json",
 )
 
 
