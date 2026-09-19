@@ -149,143 +149,6 @@ def call_openai_images_generations(
         pass
     return None
 
-def call_gemini_generate_image(
-    prompt_text: str,
-    reference_image: Optional[str] = None,
-    extra_description: Optional[str] = None,
-    size: str = "1024x1024",
-    quality: str = "hd",
-    image_detail: str = "high",
-    cfg: Optional[Dict[str, Any]] = None
-) -> Tuple[bool, Optional[str], Optional[str], str]:
-    """Generates an image directly using Google Gemini / Imagen 3 official API."""
-    if cfg is None:
-        cfg = get_ai_config()
-
-    gemini_key = cfg.get("gemini_api_key", "").strip()
-    if not gemini_key:
-        return False, None, None, "Chưa cấu hình GEMINI_API_KEY trong tệp .env. Vui lòng nhập API key của Google Gemini vào .env."
-
-    image_model = cfg.get("gemini_model", "gemini-2.5-flash").strip()
-    chat_model = cfg.get("gemini_model", "gemini-2.5-flash").strip()
-    timeout = cfg.get("timeout", 300)
-
-    # Map resolution string to Imagen 3 supported aspect ratio
-    aspect_ratio = "1:1"
-    if "1792" in size or "16:9" in size or "1280x720" in size:
-        aspect_ratio = "16:9" if size.startswith("1792") or size.startswith("1280") else "9:16"
-    elif "1536" in size or "3:2" in size or "2:3" in size:
-        aspect_ratio = "3:2" if size.startswith("1536") else "9:16"
-    elif "1365" in size or "4:3" in size or "3:4" in size:
-        aspect_ratio = "4:3" if size.startswith("1365") else "3:4"
-    elif "9:16" in size:
-        aspect_ratio = "9:16"
-    elif "16:9" in size:
-        aspect_ratio = "16:9"
-    elif "3:4" in size:
-        aspect_ratio = "3:4"
-    elif "4:3" in size:
-        aspect_ratio = "4:3"
-
-    # Build prompt
-    prompt_parts = [prompt_text.strip()]
-    if extra_description and extra_description.strip():
-        prompt_parts.append(f"Additional details: {extra_description.strip()}")
-    if reference_image:
-        prompt_parts.append("Maintain strict subject identity, facial features, and style consistency from the reference subject.")
-    combined_prompt = ". ".join(prompt_parts)
-
-    ctx = ssl.create_default_context()
-    ctx.check_hostname = False
-    ctx.verify_mode = ssl.CERT_NONE
-
-    # Strategy 1: If reference image is provided, attempt Multimodal Gemini 2.0 Flash generation
-    if reference_image:
-        try:
-            mime_type = "image/png"
-            b64_pure = reference_image
-            if reference_image.startswith("data:"):
-                hdr, b64_pure = reference_image.split(",", 1)
-                if "image/jpeg" in hdr or "image/jpg" in hdr:
-                    mime_type = "image/jpeg"
-                elif "image/webp" in hdr:
-                    mime_type = "image/webp"
-
-            gemini_ep = f"https://generativelanguage.googleapis.com/v1beta/models/{chat_model}:generateContent?key={gemini_key}"
-            gemini_payload = {
-                "contents": [
-                    {
-                        "role": "user",
-                        "parts": [
-                            {"text": f"Generate a new high-resolution visual matching this prompt, preserving the subject identity from the image. Prompt: {combined_prompt}. Aspect ratio: {aspect_ratio}."},
-                            {
-                                "inline_data": {
-                                    "mime_type": mime_type,
-                                    "data": b64_pure
-                                }
-                            }
-                        ]
-                    }
-                ],
-                "generationConfig": {
-                    "responseModalities": ["IMAGE", "TEXT"]
-                }
-            }
-            req = urllib.request.Request(
-                gemini_ep,
-                data=json.dumps(gemini_payload).encode("utf-8"),
-                headers={"Content-Type": "application/json"}
-            )
-            with urllib.request.urlopen(req, timeout=timeout, context=ctx) as resp:
-                data = json.loads(resp.read().decode("utf-8", errors="ignore"))
-                for cand in data.get("candidates", []):
-                    for part in cand.get("content", {}).get("parts", []):
-                        if "inlineData" in part:
-                            in_mime = part["inlineData"].get("mimeType", "image/png")
-                            in_b64 = part["inlineData"].get("data", "")
-                            if in_b64:
-                                return True, f"data:{in_mime};base64,{in_b64}", "base64", f"Sinh ảnh thành công từ Google Gemini ({chat_model})"
-        except Exception:
-            pass
-
-    # Strategy 2: Official Google Imagen 3 (:predict)
-    imagen_ep = f"https://generativelanguage.googleapis.com/v1beta/models/{image_model}:predict?key={gemini_key}"
-    imagen_payload = {
-        "instances": [
-            {"prompt": combined_prompt}
-        ],
-        "parameters": {
-            "sampleCount": 1,
-            "aspectRatio": aspect_ratio,
-            "outputOptions": {
-                "mimeType": "image/png"
-            },
-            "personGeneration": "ALLOW_ADULT"
-        }
-    }
-
-    try:
-        req = urllib.request.Request(
-            imagen_ep,
-            data=json.dumps(imagen_payload).encode("utf-8"),
-            headers={"Content-Type": "application/json"}
-        )
-        with urllib.request.urlopen(req, timeout=timeout, context=ctx) as resp:
-            data = json.loads(resp.read().decode("utf-8", errors="ignore"))
-            preds = data.get("predictions", [])
-            if preds and len(preds) > 0:
-                first = preds[0]
-                b64_bytes = first.get("bytesBase64Encoded", "")
-                mime = first.get("mimeType", "image/png")
-                if b64_bytes:
-                    return True, f"data:{mime};base64,{b64_bytes}", "base64", f"Sinh ảnh thành công từ Google Imagen 3 ({image_model})"
-            return False, None, None, f"Google Imagen 3 không trả về kết quả ảnh: {str(data)[:200]}"
-    except urllib.error.HTTPError as e:
-        err_msg = e.read().decode("utf-8", errors="ignore")
-        return False, None, None, f"Lỗi HTTP {e.code} từ Google Imagen API: {err_msg[:300]}"
-    except Exception as e:
-        return False, None, None, f"Lỗi kết nối tới Google Gemini: {str(e)}"
-
 def call_ai_generate_image(
     prompt_text: str,
     reference_image: Optional[str] = None,
@@ -296,17 +159,16 @@ def call_ai_generate_image(
     provider: Optional[str] = None
 ) -> Tuple[bool, Optional[str], Optional[str], str]:
     """
-    Calls configured AI to generate an image.
-    Supports two providers: 'openai' (Custom OpenAI / 9router) or 'gemini' (Official Google Gemini API).
+    Calls configured AI to generate an image using OpenAI-compatible API.
     Returns: (success, image_result, format_type, message)
     format_type: 'url', 'base64', 'svg'
     """
     cfg = get_ai_config()
-    active_provider = (provider or cfg.get("provider") or "openai").strip().lower()
+    active_provider = "openai"
 
-    if active_provider == "gemini":
-        return call_gemini_generate_image(
-            prompt_text=prompt_text,
+    # OpenAI-compatible generation logic
+    return call_openai_compatible_generate_image(
+        prompt_text=prompt_text,
             reference_image=reference_image,
             extra_description=extra_description,
             size=size,
@@ -317,8 +179,10 @@ def call_ai_generate_image(
 
     api_key = cfg.get("api_key", "")
     base_url = cfg.get("base_url") or "https://api.openai.com/v1"
-    model_name = cfg.get("image_model") or cfg.get("chat_model") or "gpt-4o-mini"
+    # Use configured image model with priority: image_model > chat_model > model > default
+    model_name = cfg.get("image_model") or cfg.get("chat_model") or cfg.get("model") or "gpt-4o-mini"
     timeout = cfg.get("timeout", 300)
+    image_ref_support = cfg.get("image_reference_support", False)
 
     if not api_key:
         return False, None, None, "Chưa cấu hình AI_API_KEY trong tệp .env. Vui lòng cấu hình API Key để tạo ảnh."
@@ -352,11 +216,49 @@ def call_ai_generate_image(
 
     # STRATEGY:
     # A. If reference_image is provided -> Prioritize /chat/completions with Multimodal Vision (image_url)
-    # because vision LLMs/Gemini inspect the actual image pixels and generate conditioned on it!
+    # because vision LLMs inspect the actual image pixels and generate conditioned on it!
     # B. If NO reference_image -> Prioritize standard /images/generations endpoint!
 
     if reference_image:
-        # 1. Attempt Multimodal Chat Completion with image_url & detail
+        # If image_reference_support is enabled, use /images/generations with image field directly
+        if image_ref_support:
+            try:
+                # Extract base64 from data URL if needed
+                ref_image_b64 = reference_image
+                if reference_image.startswith("data:image"):
+                    # Strip data URL prefix to get bare base64
+                    if "base64," in reference_image:
+                        ref_image_b64 = reference_image.split("base64,", 1)[1]
+
+                img_headers = {
+                    "Content-Type": "application/json",
+                    "Authorization": f"Bearer {api_key}"
+                }
+                img_payload = {
+                    "model": model_name,
+                    "prompt": combined_prompt,
+                    "n": 1,
+                    "size": size,
+                    "quality": quality,
+                    "image": ref_image_b64
+                }
+                req = urllib.request.Request(
+                    image_endpoint,
+                    data=json.dumps(img_payload).encode("utf-8"),
+                    headers=img_headers
+                )
+                with urllib.request.urlopen(req, timeout=timeout, context=ctx) as resp:
+                    data = json.loads(resp.read().decode("utf-8", errors="ignore"))
+                    if "data" in data and len(data["data"]) > 0:
+                        first = data["data"][0]
+                        if "url" in first and first["url"]:
+                            return True, first["url"], "url", f"Sinh ảnh thành công theo ảnh tham chiếu từ {model_name}"
+                        if "b64_json" in first and first["b64_json"]:
+                            return True, format_b64_image(first['b64_json']), "base64", f"Sinh ảnh thành công theo ảnh tham chiếu từ {model_name}"
+            except Exception as e:
+                return False, None, None, f"Lỗi tạo ảnh với hỗ trợ tham chiếu: {str(e)}"
+
+        # Otherwise, fall back to multimodal chat completion
         multimodal_headers = {
             "Content-Type": "application/json",
             "Authorization": f"Bearer {api_key}"
@@ -411,7 +313,7 @@ def call_ai_generate_image(
         except Exception as e:
             multimodal_error = str(e)
 
-        # 2. Fallback for reference image: try /images/generations with image field
+        # 2. Fallback: try /images/generations with image field
         try:
             img_payload = {
                 "model": model_name,

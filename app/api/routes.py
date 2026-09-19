@@ -23,7 +23,7 @@ class SetPrimaryFieldRequest(BaseModel):
 class GenerateContentRequest(BaseModel):
     prompt: str = Field(..., description="Nội dung câu lệnh prompt")
     extra_instruction: Optional[str] = Field(None, description="Yêu cầu bổ sung cho AI")
-    provider: Optional[str] = Field(None, description="Nhà cung cấp: 'openai' hoặc 'gemini'")
+    provider: Optional[str] = Field(None, description="Nhà cung cấp: 'openai'")
 
 class AddSampleContentRequest(BaseModel):
     content: str = Field(..., description="Nội dung văn bản mẫu")
@@ -41,7 +41,7 @@ class UpdatePromptRequest(BaseModel):
 
 class ImprovePromptRequest(BaseModel):
     instruction: str = Field(..., description="Yêu cầu cải tiến của người dùng")
-    provider: Optional[str] = Field(None, description="Nhà cung cấp AI: 'openai' hoặc 'gemini'")
+    provider: Optional[str] = Field(None, description="Nhà cung cấp AI: 'openai'")
 
 class SaveImprovedPromptRequest(BaseModel):
     mode: str = Field("overwrite", description="Chế độ lưu: 'overwrite' hoặc 'new_version'")
@@ -54,7 +54,7 @@ class SaveImprovedPromptRequest(BaseModel):
 
 class ExtractJsonFromImageRequest(BaseModel):
     image: str = Field(..., description="Base64 hoặc URL của ảnh cần trích xuất JSON VisionStruct")
-    provider: Optional[str] = Field(None, description="Nhà cung cấp: 'openai' hoặc 'gemini'")
+    provider: Optional[str] = Field(None, description="Nhà cung cấp: 'openai'")
 
 class GenerateImageRequest(BaseModel):
     prompt: str = Field(..., description="Nội dung câu lệnh tạo ảnh")
@@ -63,7 +63,7 @@ class GenerateImageRequest(BaseModel):
     size: Optional[str] = Field("1024x1024", description="Kích thước ảnh")
     quality: Optional[str] = Field("hd", description="Chất lượng ảnh")
     image_detail: Optional[str] = Field("high", description="Mức độ bám sát chi tiết ảnh tham chiếu")
-    provider: Optional[str] = Field(None, description="Nhà cung cấp: 'openai' hoặc 'gemini'")
+    provider: Optional[str] = Field(None, description="Nhà cung cấp: 'openai'")
 
 class SaveGeneratedImageRequest(BaseModel):
     image_data: str = Field(..., description="URL hoặc Base64 ảnh đã tạo")
@@ -85,7 +85,7 @@ class AssistantChatRequest(BaseModel):
     message: str = Field(..., description="Nội dung câu hỏi / yêu cầu tìm kiếm của người dùng")
     history: Optional[List[Dict[str, Any]]] = Field(default_factory=list, description="Lịch sử chat gần nhất")
     category: Optional[str] = Field("all", description="Bộ lọc danh mục: 'all', 'image' hoặc 'content'")
-    provider: Optional[str] = Field(None, description="Nhà cung cấp AI: 'openai' hoặc 'gemini'")
+    provider: Optional[str] = Field(None, description="Nhà cung cấp AI: 'openai'")
 
 @router.get("/prompts")
 @router.get("/prompts/")
@@ -579,51 +579,35 @@ def suggest_prompt_title(prompt_id: str):
     user_content = f"Hãy đặt tiêu đề bằng TIẾNG VIỆT cho câu lệnh prompt sau:\n\n{prompt_text[:2000]}"
 
     new_title = ""
-    active_provider = (cfg.get("provider") or "openai").lower()
+    active_provider = "openai"
     ctx = ssl.create_default_context()
     ctx.check_hostname = False
     ctx.verify_mode = ssl.CERT_NONE
 
     try:
-        if active_provider == "gemini" and cfg.get("gemini_api_key"):
-            gemini_key = cfg.get("gemini_api_key")
-            g_model = cfg.get("gemini_chat_model", "gemini-2.0-flash") or "gemini-2.0-flash"
-            endpoint = f"https://generativelanguage.googleapis.com/v1beta/models/{g_model}:generateContent?key={gemini_key}"
-            payload = {
-                "system_instruction": {"parts": [{"text": system_prompt}]},
-                "contents": [{"role": "user", "parts": [{"text": user_content}]}],
-                "generationConfig": {"temperature": 0.4}
-            }
-            req = urllib.request.Request(endpoint, data=json.dumps(payload).encode("utf-8"), headers={"Content-Type": "application/json"})
-            with urllib.request.urlopen(req, timeout=timeout, context=ctx) as resp:
-                data = json.loads(resp.read().decode("utf-8", errors="ignore"))
-                parts = data.get("candidates", [])[0].get("content", {}).get("parts", [])
-                if parts:
-                    new_title = parts[0].get("text", "").strip()
-        else:
-            if not api_key:
-                raise HTTPException(status_code=500, detail="Chưa cấu hình API Key trong .env")
+        if not api_key:
+            raise HTTPException(status_code=500, detail="Chưa cấu hình API Key trong .env")
 
-            endpoint = f"{base_url.rstrip('/')}/chat/completions"
-            headers = {
-                "Content-Type": "application/json",
-                "Authorization": f"Bearer {api_key}"
-            }
-            payload = {
-                "model": model_name,
-                "messages": [
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": user_content}
-                ],
-                "temperature": 0.4,
-                "stream": False
-            }
-            req = urllib.request.Request(endpoint, data=json.dumps(payload).encode("utf-8"), headers=headers)
-            with urllib.request.urlopen(req, timeout=timeout, context=ctx) as resp:
-                data = json.loads(resp.read().decode("utf-8", errors="ignore"))
-                choices = data.get("choices", [])
-                if choices:
-                    new_title = choices[0].get("message", {}).get("content", "").strip()
+        endpoint = f"{base_url.rstrip('/')}/chat/completions"
+        headers = {
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {api_key}"
+        }
+        payload = {
+            "model": model_name,
+            "messages": [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_content}
+            ],
+            "temperature": 0.4,
+            "stream": False
+        }
+        req = urllib.request.Request(endpoint, data=json.dumps(payload).encode("utf-8"), headers=headers)
+        with urllib.request.urlopen(req, timeout=timeout, context=ctx) as resp:
+            data = json.loads(resp.read().decode("utf-8", errors="ignore"))
+            choices = data.get("choices", [])
+            if choices:
+                new_title = choices[0].get("message", {}).get("content", "").strip()
 
         # Clean title
         new_title = re.sub(r"^[\"'\s*`]+|[\"'\s*`]+$", "", new_title)
@@ -795,15 +779,11 @@ def get_providers_config():
     from app.config import get_ai_config
     cfg = get_ai_config()
     return {
-        "active_provider": cfg.get("provider", "openai"),
+        "active_provider": "openai",
         "openai": {
             "has_key": bool(cfg.get("api_key")),
             "base_url": cfg.get("base_url"),
-            "model": cfg.get("model"),
-        },
-        "gemini": {
-            "has_key": bool(cfg.get("gemini_api_key")),
-            "model": cfg.get("gemini_model", "gemini-2.5-flash"),
+            "model": cfg.get("chat_model") or cfg.get("model"),
         }
     }
 
@@ -813,12 +793,13 @@ def get_config():
     from app.config import get_ai_config, is_setup_done
     cfg = get_ai_config()
     return {
-        "provider": cfg.get("provider"),
+        "provider": "openai",
         "base_url": cfg.get("base_url"),
         "has_api_key": bool(cfg.get("api_key")),
         "model": cfg.get("model"),
-        "has_gemini_key": bool(cfg.get("gemini_api_key")),
-        "gemini_model": cfg.get("gemini_model"),
+        "chat_model": cfg.get("chat_model"),
+        "image_model": cfg.get("image_model"),
+        "image_reference_support": cfg.get("image_reference_support", False),
         "timeout": cfg.get("timeout"),
         "stream": cfg.get("stream"),
         "setup_done": is_setup_done(),

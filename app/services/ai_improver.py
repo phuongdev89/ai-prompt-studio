@@ -149,62 +149,6 @@ QUY TẮC BẢO TOÀN BỘ KHUNG TUYỆT ĐỐI (CRITICAL FRAMEWORK PRESERVATION
 """
 
 
-def call_gemini_improve_prompt(system_prompt: str, user_content: str, cfg: Dict[str, Any]) -> Tuple[bool, Any, str]:
-    api_key = cfg.get("gemini_api_key", "").strip()
-    if not api_key:
-        return False, None, "Chưa cấu hình GEMINI_API_KEY trong tệp .env. Vui lòng kiểm tra lại tệp .env."
-
-    model_name = cfg.get("gemini_chat_model", "gemini-2.0-flash") or "gemini-2.0-flash"
-    timeout = cfg.get("timeout", 300)
-    endpoint = f"https://generativelanguage.googleapis.com/v1beta/models/{model_name}:generateContent?key={api_key}"
-
-    payload = {
-        "system_instruction": {
-            "parts": [{"text": system_prompt}]
-        },
-        "contents": [
-            {
-                "role": "user",
-                "parts": [{"text": user_content}]
-            }
-        ],
-        "generationConfig": {
-            "temperature": 0.2,
-            "responseMimeType": "application/json"
-        }
-    }
-
-    ctx = ssl.create_default_context()
-    ctx.check_hostname = False
-    ctx.verify_mode = ssl.CERT_NONE
-
-    try:
-        req = urllib.request.Request(
-            endpoint,
-            data=json.dumps(payload).encode("utf-8"),
-            headers={"Content-Type": "application/json"}
-        )
-        with urllib.request.urlopen(req, timeout=timeout, context=ctx) as resp:
-            data = json.loads(resp.read().decode("utf-8", errors="ignore"))
-            candidates = data.get("candidates", [])
-            if not candidates:
-                return False, None, "Google Gemini không trả về kết quả nào."
-
-            parts = candidates[0].get("content", {}).get("parts", [])
-            if not parts:
-                return False, None, "Google Gemini phản hồi rỗng."
-
-            raw_text_out = parts[0].get("text", "").strip()
-            cleaned = clean_json_response(raw_text_out)
-            parsed_json = json.loads(cleaned)
-            return True, parsed_json, f"Cải tiến thành công qua Google Gemini ({model_name})"
-    except urllib.error.HTTPError as e:
-        err_msg = e.read().decode("utf-8", errors="ignore")
-        return False, None, f"Lỗi HTTP {e.code} từ Google Gemini API: {err_msg[:300]}"
-    except Exception as e:
-        return False, None, f"Lỗi kết nối tới Google Gemini: {str(e)}"
-
-
 def call_openai_improve_prompt(system_prompt: str, user_content: str, cfg: Dict[str, Any]) -> Tuple[bool, Any, str]:
     api_key = cfg.get("api_key", "").strip()
     base_url = cfg.get("base_url", "https://api.openai.com/v1").strip()
@@ -349,11 +293,8 @@ def call_ai_improve_prompt(
             "Tuyệt đối KHÔNG XOÁ bất kỳ mục nào, không đổi vị trí các mục, chỉ nâng cấp nội dung theo yêu cầu cải tiến."
         )
 
-    # 3. Gửi yêu cầu tới Provider AI
-    if active_provider == "gemini":
-        success, raw_result, msg = call_gemini_improve_prompt(system_prompt, user_content, cfg)
-    else:
-        success, raw_result, msg = call_openai_improve_prompt(system_prompt, user_content, cfg)
+    # 3. Gửi yêu cầu tới OpenAI-compatible API
+    success, raw_result, msg = call_openai_improve_prompt(system_prompt, user_content, cfg)
 
     if not success:
         return False, {}, msg

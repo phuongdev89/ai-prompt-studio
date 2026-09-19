@@ -328,11 +328,8 @@ def call_ai_search_assistant(
 
 LƯU Ý QUAN TRỌNG: Bạn là công cụ tìm kiếm prompt. Bạn PHẢI LUÔN LUÔN trả về mảng `recommended_prompts` chứa 1 đến 4 prompt phù hợp nhất từ danh sách ứng viên (CHỈ dùng ID có trong danh sách). Tuyệt đối không chỉ trả lời văn bản mà không có danh sách prompt. Trả về đúng JSON theo cấu trúc."""
 
-    # 4. Gửi yêu cầu tới Provider AI
-    if active_provider == "gemini":
-        success, raw_result, msg = _call_gemini_assistant(formatted_user_prompt, history, cfg)
-    else:
-        success, raw_result, msg = _call_openai_assistant(formatted_user_prompt, history, cfg)
+    # 4. Gửi yêu cầu tới OpenAI-compatible API
+    success, raw_result, msg = _call_openai_assistant(formatted_user_prompt, history, cfg)
 
     if not success:
         return False, {}, msg
@@ -379,81 +376,6 @@ LƯU Ý QUAN TRỌNG: Bạn là công cụ tìm kiếm prompt. Bạn PHẢI LUÔ
 
     return True, result, "Tìm kiếm prompt thành công"
 
-def _call_gemini_assistant(
-    user_prompt: str,
-    history: Optional[List[Dict[str, Any]]],
-    cfg: Dict[str, Any]
-) -> Tuple[bool, Any, str]:
-    """Gọi Google Gemini API trực tiếp với chuẩn hóa history."""
-    api_key = cfg.get("gemini_api_key", "").strip()
-    model_name = cfg.get("gemini_chat_model", "gemini-2.0-flash") or "gemini-2.0-flash"
-    timeout = cfg.get("timeout", 90)
-
-    if not api_key:
-        return False, None, "Chưa cấu hình GEMINI_API_KEY trong tệp .env."
-
-    endpoint = f"https://generativelanguage.googleapis.com/v1beta/models/{model_name}:generateContent?key={api_key}"
-
-    # Build contents with strictly alternating roles for Gemini
-    contents = []
-    if history and isinstance(history, list):
-        last_role = None
-        for h in history[-6:]:
-            if not isinstance(h, dict):
-                continue
-            role = "user" if h.get("role") == "user" else "model"
-            text = h.get("content")
-            if not isinstance(text, str):
-                text = str(text or "")
-            text = text.strip()
-            if text:
-                if role == last_role:
-                    contents[-1]["parts"][0]["text"] += f"\n{text}"
-                else:
-                    contents.append({"role": role, "parts": [{"text": text}]})
-                    last_role = role
-
-        # If last history message was 'user', merge it into user_prompt to avoid double user messages
-        if contents and contents[-1]["role"] == "user":
-            popped_text = contents.pop()["parts"][0]["text"]
-            user_prompt = f"[Câu hỏi trước: {popped_text}]\n\n{user_prompt}"
-
-    contents.append({"role": "user", "parts": [{"text": user_prompt}]})
-
-    payload = {
-        "system_instruction": {"parts": [{"text": SYSTEM_PROMPT_ASSISTANT}]},
-        "contents": contents,
-        "generationConfig": {
-            "temperature": 0.2,
-            "responseMimeType": "application/json"
-        }
-    }
-
-    ctx = ssl.create_default_context()
-    ctx.check_hostname = False
-    ctx.verify_mode = ssl.CERT_NONE
-
-    try:
-        req = urllib.request.Request(
-            endpoint,
-            data=json.dumps(payload).encode("utf-8"),
-            headers={"Content-Type": "application/json"}
-        )
-        with urllib.request.urlopen(req, timeout=timeout, context=ctx) as resp:
-            data = json.loads(resp.read().decode("utf-8", errors="ignore"))
-            candidates = data.get("candidates", [])
-            if not candidates:
-                return False, None, "Gemini không trả về nội dung nào."
-            parts = candidates[0].get("content", {}).get("parts", [])
-            if not parts:
-                return False, None, "Gemini trả về nội dung rỗng."
-            text_out = parts[0].get("text", "").strip()
-
-            cleaned = clean_json_response(text_out)
-            parsed = json.loads(cleaned)
-            return True, parsed, "Thành công từ Gemini"
-    except Exception as e:
-        return False, None, f"Lỗi Gemini Assistant: {str(e)}"
 
 def _call_openai_assistant(
     user_prompt: str,

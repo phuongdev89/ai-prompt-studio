@@ -76,10 +76,7 @@ DANH SÁCH TẤT CẢ CÁC TRƯỜNG THAM SỐ ({len(fields)} trường):
 
     # 1. Thử gọi AI trực tiếp
     try:
-        if active_provider == "gemini":
-            ai_text, ai_source_name = _call_gemini_suggester(user_message, cfg)
-        else:
-            ai_text, ai_source_name = _call_openai_suggester(user_message, cfg)
+        ai_text, ai_source_name = _call_openai_suggester(user_message, cfg)
 
         if ai_text:
             selected_ids = _parse_ai_selected_ids(ai_text, fields)
@@ -139,50 +136,6 @@ def _call_openai_suggester(user_content: str, cfg: Dict[str, Any]) -> Tuple[str,
         content = choices[0].get("message", {}).get("content", "").strip()
         return content, model_name
 
-def _call_gemini_suggester(user_content: str, cfg: Dict[str, Any]) -> Tuple[str, str]:
-    api_key = cfg.get("gemini_api_key", "").strip()
-    model_name = cfg.get("gemini_chat_model", "gemini-2.0-flash") or "gemini-2.0-flash"
-    timeout = min(cfg.get("timeout", 60), 60)
-
-    if not api_key:
-        raise ValueError("Chưa cấu hình GEMINI_API_KEY trong tệp .env")
-
-    endpoint = f"https://generativelanguage.googleapis.com/v1beta/models/{model_name}:generateContent?key={api_key}"
-    payload = {
-        "system_instruction": {
-            "parts": [{"text": SYSTEM_PROMPT_PRIMARY_SUGGESTER}]
-        },
-        "contents": [
-            {
-                "role": "user",
-                "parts": [{"text": user_content}]
-            }
-        ],
-        "generationConfig": {
-            "temperature": 0.2,
-            "maxOutputTokens": 1024
-        }
-    }
-
-    ctx = ssl.create_default_context()
-    ctx.check_hostname = False
-    ctx.verify_mode = ssl.CERT_NONE
-
-    req = urllib.request.Request(
-        endpoint,
-        data=json.dumps(payload).encode("utf-8"),
-        headers={"Content-Type": "application/json"}
-    )
-    with urllib.request.urlopen(req, timeout=timeout, context=ctx) as resp:
-        data = json.loads(resp.read().decode("utf-8", errors="ignore"))
-        candidates = data.get("candidates", [])
-        if not candidates:
-            raise ValueError("Google Gemini phản hồi rỗng")
-        parts = candidates[0].get("content", {}).get("parts", [])
-        if not parts:
-            raise ValueError("Google Gemini không trả về dữ liệu")
-        text_out = parts[0].get("text", "").strip()
-        return text_out, model_name
 
 def _parse_ai_selected_ids(ai_text: str, fields: List[Dict[str, Any]]) -> Optional[Set[int]]:
     """

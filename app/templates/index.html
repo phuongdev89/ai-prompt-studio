@@ -754,11 +754,6 @@
                             <i class="fa-solid fa-network-wired text-xs"></i>
                             <span>Custom OpenAI</span>
                         </button>
-                        <button type="button" onclick="setImproveProvider('gemini')" id="btnImproveProviderGemini"
-                                class="px-3 py-1.5 rounded-lg font-medium transition flex items-center gap-1.5 text-slate-400 hover:text-white">
-                            <i class="fa-brands fa-google text-xs text-amber-400"></i>
-                            <span>Google Gemini</span>
-                        </button>
                     </div>
                 </div>
 
@@ -1123,7 +1118,7 @@
                     </button>
                 </div>
 
-                <!-- AI Provider Selector (Custom OpenAI vs Google Gemini) -->
+                <!-- AI Provider Selector (Custom OpenAI) -->
                 <div class="p-3 bg-dark-900/90 rounded-xl border border-dark-700 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                     <div class="flex items-center gap-2">
                         <span class="text-xs font-semibold text-slate-200 flex items-center gap-1.5">
@@ -1137,11 +1132,6 @@
                                 class="px-3 py-1.5 rounded-lg font-medium transition flex items-center gap-1.5 bg-indigo-600 text-white shadow">
                             <i class="fa-solid fa-network-wired text-xs"></i>
                             <span>Custom OpenAI</span>
-                        </button>
-                        <button type="button" onclick="setGenProvider('gemini')" id="btnProviderGemini"
-                                class="px-3 py-1.5 rounded-lg font-medium transition flex items-center gap-1.5 text-slate-400 hover:text-white">
-                            <i class="fa-brands fa-google text-xs text-amber-400"></i>
-                            <span>Google Gemini</span>
                         </button>
                     </div>
                 </div>
@@ -1160,15 +1150,27 @@
                               placeholder="Nội dung câu lệnh prompt..."></textarea>
                 </div>
 
-                <!-- Chú thích về ảnh tham chiếu khi dùng API -->
-                <div class="p-4 rounded-xl bg-amber-500/10 border border-amber-500/25 text-amber-200 text-xs flex items-start gap-3 shadow-inner">
-                    <div class="w-8 h-8 rounded-lg bg-amber-500/20 text-amber-400 flex items-center justify-center flex-shrink-0 mt-0.5">
-                        <i class="fa-solid fa-circle-info text-sm"></i>
+                <!-- Reference Image Upload -->
+                <div class="space-y-1.5">
+                    <label for="genRefImageUpload" class="text-xs font-semibold text-slate-200 flex items-center gap-1.5">
+                        <i class="fa-solid fa-image text-purple-400 text-xs"></i>
+                        <span>Ảnh tham chiếu (tùy chọn)</span>
+                        <span class="text-[10px] text-purple-400 font-mono px-1.5 py-0.5 rounded bg-purple-500/10 border border-purple-500/20">Reference Image</span>
+                    </label>
+                    <div class="relative">
+                        <input type="file" id="genRefImageUpload" accept="image/*" class="hidden" onchange="handleGenRefImageUpload(event)">
+                        <button type="button" onclick="document.getElementById('genRefImageUpload').click()" class="w-full px-3.5 py-2.5 bg-dark-900 text-slate-400 text-xs rounded-xl border border-dark-700 hover:border-purple-500 focus:outline-none focus:border-purple-500 transition flex items-center justify-center gap-2">
+                            <i class="fa-solid fa-upload"></i>
+                            <span id="genRefImageLabel">Tải ảnh tham chiếu lên</span>
+                        </button>
+                        <div id="genRefImagePreview" class="hidden mt-2 relative rounded-lg overflow-hidden border border-dark-700">
+                            <img id="genRefImagePreviewImg" class="w-full h-32 object-cover">
+                            <button type="button" onclick="clearGenRefImage()" class="absolute top-2 right-2 w-6 h-6 rounded-full bg-red-500/90 hover:bg-red-600 text-white flex items-center justify-center transition">
+                                <i class="fa-solid fa-times text-xs"></i>
+                            </button>
+                        </div>
                     </div>
-                    <div class="space-y-0.5">
-                        <span class="font-bold text-amber-300">Lưu ý về ảnh tham chiếu:</span>
-                        <p class="text-xs text-slate-300 leading-relaxed">Dùng AI qua API không thể sử dụng ảnh tham chiếu, hãy dùng trực tiếp với AI của hãng như Gemini, Claude, ChatGPT.</p>
-                    </div>
+                    <p class="text-[11px] text-slate-400">Ảnh sẽ được chuyển sang Base64 và gửi kèm với câu lệnh (yêu cầu bật "Hỗ trợ tham chiếu" trong cấu hình)</p>
                 </div>
 
                 <!-- Parameters: Size & Quality (Cân đối 2 cột) -->
@@ -1347,11 +1349,6 @@
                                 class="px-3 py-1.5 rounded-lg font-medium transition flex items-center gap-1.5 bg-cyan-600 text-white shadow">
                             <i class="fa-solid fa-network-wired text-xs"></i>
                             <span>Custom OpenAI</span>
-                        </button>
-                        <button type="button" onclick="setUsePromptProvider('gemini')" id="btnUsePromptGemini"
-                                class="px-3 py-1.5 rounded-lg font-medium transition flex items-center gap-1.5 text-slate-400 hover:text-white">
-                            <i class="fa-brands fa-google text-xs text-amber-400"></i>
-                            <span>Google Gemini</span>
                         </button>
                     </div>
                 </div>
@@ -1732,28 +1729,20 @@
                 <button onclick="closeSettingsModal()" class="text-slate-400 hover:text-white text-xl">&times;</button>
             </div>
 
-            <!-- Provider Tabs -->
-            <div class="flex gap-2">
-                <button id="cfgTabOpenAI" onclick="cfgSwitchProvider('openai')" class="flex-1 px-3 py-2 rounded-lg text-xs font-semibold border border-brand-500 text-brand-400 bg-brand-500/10 transition">Custom OpenAI</button>
-                <button id="cfgTabGemini" onclick="cfgSwitchProvider('gemini')" class="flex-1 px-3 py-2 rounded-lg text-xs font-semibold border border-dark-600 text-slate-400 hover:text-white transition">Google Gemini</button>
-            </div>
-
-            <!-- OpenAI Group -->
-            <div id="cfgGrpOpenAI">
+            <!-- OpenAI Configuration -->
+            <div>
                 <label class="block text-xs font-semibold text-slate-400 mb-1">Base URL</label>
                 <input id="cfgBaseUrl" class="w-full px-3 py-2 rounded-lg bg-dark-900 border border-dark-600 text-sm text-white" placeholder="https://api.openai.com/v1">
                 <label class="block text-xs font-semibold text-slate-400 mb-1 mt-3">API Key</label>
                 <input id="cfgApiKey" type="password" class="w-full px-3 py-2 rounded-lg bg-dark-900 border border-dark-600 text-sm text-white" placeholder="sk-...">
-                <label class="block text-xs font-semibold text-slate-400 mb-1 mt-3">Model</label>
-                <input id="cfgModel" class="w-full px-3 py-2 rounded-lg bg-dark-900 border border-dark-600 text-sm text-white" placeholder="gpt-4o-mini">
-            </div>
-
-            <!-- Gemini Group -->
-            <div id="cfgGrpGemini" class="hidden">
-                <label class="block text-xs font-semibold text-slate-400 mb-1">Gemini API Key</label>
-                <input id="cfgGeminiKey" type="password" class="w-full px-3 py-2 rounded-lg bg-dark-900 border border-dark-600 text-sm text-white" placeholder="AI...">
-                <label class="block text-xs font-semibold text-slate-400 mb-1 mt-3">Gemini Model</label>
-                <input id="cfgGeminiModel" class="w-full px-3 py-2 rounded-lg bg-dark-900 border border-dark-600 text-sm text-white" placeholder="gemini-2.5-flash">
+                <label class="block text-xs font-semibold text-slate-400 mb-1 mt-3">Chat Model</label>
+                <input id="cfgChatModel" class="w-full px-3 py-2 rounded-lg bg-dark-900 border border-dark-600 text-sm text-white" placeholder="gpt-4o-mini">
+                <label class="block text-xs font-semibold text-slate-400 mb-1 mt-3">Image Model</label>
+                <input id="cfgImageModel" class="w-full px-3 py-2 rounded-lg bg-dark-900 border border-dark-600 text-sm text-white" placeholder="cx/gpt-5.6-sol-image">
+                <label class="flex items-center gap-2 mt-2 cursor-pointer">
+                    <input type="checkbox" id="cfgImageRefSupport" class="w-4 h-4 rounded border-dark-600 bg-dark-900 text-brand-500 focus:ring-brand-500">
+                    <span class="text-xs text-slate-400">Hỗ trợ tham chiếu</span>
+                </label>
             </div>
 
             <div>

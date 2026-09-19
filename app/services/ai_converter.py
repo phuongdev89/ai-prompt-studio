@@ -161,7 +161,7 @@ def parse_chat_response(body_text: str) -> str:
 
 def clean_json_response(content: str) -> str:
     content = content.strip()
-    # 1. Remove <think> ... </think> tags from thinking models (DeepSeek-R1, Gemini Thinking, etc.)
+    # 1. Remove <think> ... </think> tags from thinking models (DeepSeek-R1, etc.)
     content = re.sub(r"<think>[\s\S]*?</think>", "", content, flags=re.IGNORECASE).strip()
 
     # 2. Clean markdown code fences ```json ... ``` or ``` ... ```
@@ -174,90 +174,12 @@ def clean_json_response(content: str) -> str:
     e = content.rfind('}')
     if s != -1 and e != -1 and e > s:
         content = content[s:e+1]
-    
+
     return content
-
-def call_gemini_convert_to_json(raw_text: str, cfg: Dict[str, Any], reference_image_base64: str = None) -> Tuple[bool, Any, str]:
-    api_key = cfg.get("gemini_api_key", "").strip()
-    if not api_key:
-        return False, None, "Chưa cấu hình GEMINI_API_KEY trong tệp .env. Vui lòng nhập API key của Google Gemini vào .env."
-
-    model_name = cfg.get("gemini_chat_model", "gemini-2.0-flash")
-    timeout = cfg.get("timeout", 300)
-    endpoint = f"https://generativelanguage.googleapis.com/v1beta/models/{model_name}:generateContent?key={api_key}"
-
-    # Prepare parts for user message
-    user_parts = []
-    user_parts.append({"text": f"Analyze and convert this visual information into a comprehensive, deeply structured, high-fidelity JSON object retaining 100% of all details, parameters, rules, and sub-panel breakdowns. Context/raw prompt (if any):\n\n{raw_text}"})
-
-    if reference_image_base64:
-        b64_pure = reference_image_base64
-        mime_type = "image/png"
-        if reference_image_base64.startswith("data:"):
-            hdr, b64_pure = reference_image_base64.split(",", 1)
-            if "image/jpeg" in hdr or "image/jpg" in hdr:
-                mime_type = "image/jpeg"
-            elif "image/webp" in hdr:
-                mime_type = "image/webp"
-        user_parts.append({
-            "inline_data": {
-                "mime_type": mime_type,
-                "data": b64_pure
-            }
-        })
-
-    payload = {
-        "system_instruction": {
-            "parts": [{"text": SYSTEM_PROMPT}]
-        },
-        "contents": [
-            {
-                "role": "user",
-                "parts": user_parts
-            }
-        ],
-        "generationConfig": {
-            "temperature": 0.2,
-            "responseMimeType": "application/json"
-        }
-    }
-
-    ctx = ssl.create_default_context()
-    ctx.check_hostname = False
-    ctx.verify_mode = ssl.CERT_NONE
-
-    try:
-        req = urllib.request.Request(
-            endpoint,
-            data=json.dumps(payload).encode("utf-8"),
-            headers={"Content-Type": "application/json"}
-        )
-        with urllib.request.urlopen(req, timeout=timeout, context=ctx) as resp:
-            data = json.loads(resp.read().decode("utf-8", errors="ignore"))
-            candidates = data.get("candidates", [])
-            if not candidates:
-                return False, None, "Google Gemini không trả về kết quả nào."
-            
-            parts = candidates[0].get("content", {}).get("parts", [])
-            if not parts:
-                return False, None, "Google Gemini phản hồi rỗng."
-            
-            raw_text_out = parts[0].get("text", "").strip()
-            cleaned = clean_json_response(raw_text_out)
-            parsed_json = json.loads(cleaned)
-            return True, parsed_json, f"Chuyển đổi thành công qua Google Gemini ({model_name})"
-    except urllib.error.HTTPError as e:
-        err_msg = e.read().decode("utf-8", errors="ignore")
-        return False, None, f"Lỗi HTTP {e.code} từ Google Gemini API: {err_msg[:300]}"
-    except Exception as e:
-        return False, None, f"Lỗi kết nối tới Google Gemini: {str(e)}"
 
 def call_ai_convert_to_json(raw_text: str, provider: str = None, reference_image_base64: str = None) -> Tuple[bool, Any, str]:
     cfg = get_ai_config()
-    active_provider = (provider or cfg.get("provider") or "openai").lower()
-
-    if active_provider == "gemini":
-        return call_gemini_convert_to_json(raw_text, cfg, reference_image_base64)
+    active_provider = "openai"
 
     api_key = cfg["api_key"]
     base_url = cfg["base_url"]

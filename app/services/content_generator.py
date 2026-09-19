@@ -23,74 +23,18 @@ def call_ai_generate_content(
     prompt: Optional[str] = None
 ) -> Tuple[bool, str, str]:
     """
-    Gửi prompt tới AI (OpenAI hoặc Google Gemini) để sinh nội dung content.
+    Gửi prompt tới OpenAI-compatible API để sinh nội dung content.
     Trả về (success, generated_content, message).
     """
     actual_prompt = (prompt_text or prompt or "").strip()
     cfg = get_ai_config()
-    active_provider = (provider or cfg.get("provider") or "openai").strip().lower()
 
     user_message = f"Dưới đây là câu lệnh prompt nội dung cần bạn thực hiện:\n\n```\n{actual_prompt}\n```"
     if extra_instruction and extra_instruction.strip():
         user_message += f"\n\nYêu cầu bổ sung từ người dùng:\n{extra_instruction.strip()}"
 
-    if active_provider == "gemini":
-        return _call_gemini_content(user_message, cfg)
-    else:
-        return _call_openai_content(user_message, cfg)
+    return _call_openai_content(user_message, cfg)
 
-def _call_gemini_content(user_content: str, cfg: Dict[str, Any]) -> Tuple[bool, str, str]:
-    api_key = cfg.get("gemini_api_key", "").strip()
-    model_name = cfg.get("gemini_chat_model", "gemini-2.0-flash") or "gemini-2.0-flash"
-    timeout = cfg.get("timeout", 120)
-
-    if not api_key:
-        return False, "", "Chưa cấu hình GEMINI_API_KEY trong tệp .env."
-
-    endpoint = f"https://generativelanguage.googleapis.com/v1beta/models/{model_name}:generateContent?key={api_key}"
-    payload = {
-        "system_instruction": {
-            "parts": [{"text": SYSTEM_PROMPT_CONTENT_GENERATOR}]
-        },
-        "contents": [
-            {
-                "role": "user",
-                "parts": [{"text": user_content}]
-            }
-        ],
-        "generationConfig": {
-            "temperature": 0.7,
-            "maxOutputTokens": 4096
-        }
-    }
-
-    ctx = ssl.create_default_context()
-    ctx.check_hostname = False
-    ctx.verify_mode = ssl.CERT_NONE
-
-    try:
-        req = urllib.request.Request(
-            endpoint,
-            data=json.dumps(payload).encode("utf-8"),
-            headers={"Content-Type": "application/json"}
-        )
-        with urllib.request.urlopen(req, timeout=timeout, context=ctx) as resp:
-            data = json.loads(resp.read().decode("utf-8", errors="ignore"))
-            candidates = data.get("candidates", [])
-            if not candidates:
-                return False, "", "Google Gemini không trả về nội dung nào."
-
-            parts = candidates[0].get("content", {}).get("parts", [])
-            if not parts:
-                return False, "", "Google Gemini phản hồi rỗng."
-
-            text_out = parts[0].get("text", "").strip()
-            return True, text_out, f"Tạo content thành công qua Google Gemini ({model_name})"
-    except urllib.error.HTTPError as e:
-        err_msg = e.read().decode("utf-8", errors="ignore")
-        return False, "", f"Lỗi HTTP {e.code} từ Google Gemini API: {err_msg[:300]}"
-    except Exception as e:
-        return False, "", f"Lỗi kết nối tới Google Gemini: {str(e)}"
 
 def _call_openai_content(user_content: str, cfg: Dict[str, Any]) -> Tuple[bool, str, str]:
     api_key = cfg.get("api_key", "").strip()

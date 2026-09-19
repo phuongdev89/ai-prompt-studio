@@ -2715,28 +2715,14 @@ function closeUsePromptModal() {
 }
 
 function setUsePromptProvider(provider) {
-    usePromptProvider = provider;
+    usePromptProvider = 'openai';
     const btnOpenAI = document.getElementById('btnUsePromptOpenAI');
-    const btnGemini = document.getElementById('btnUsePromptGemini');
     const badge = document.getElementById('usePromptProviderBadge');
 
-    if (provider === 'gemini') {
-        if (btnGemini) {
-            btnGemini.className = 'px-3 py-1.5 rounded-lg font-medium transition flex items-center gap-1.5 bg-cyan-600 text-white shadow';
-        }
-        if (btnOpenAI) {
-            btnOpenAI.className = 'px-3 py-1.5 rounded-lg font-medium transition flex items-center gap-1.5 text-slate-400 hover:text-white';
-        }
-        if (badge) badge.innerText = 'Google Gemini';
-    } else {
-        if (btnOpenAI) {
-            btnOpenAI.className = 'px-3 py-1.5 rounded-lg font-medium transition flex items-center gap-1.5 bg-cyan-600 text-white shadow';
-        }
-        if (btnGemini) {
-            btnGemini.className = 'px-3 py-1.5 rounded-lg font-medium transition flex items-center gap-1.5 text-slate-400 hover:text-white';
-        }
-        if (badge) badge.innerText = 'Custom OpenAI';
+    if (btnOpenAI) {
+        btnOpenAI.className = 'px-3 py-1.5 rounded-lg font-medium transition flex items-center gap-1.5 bg-cyan-600 text-white shadow';
     }
+    if (badge) badge.innerText = 'Custom OpenAI';
 }
 
 let isUsePromptPreviewCollapsed = false;
@@ -2790,7 +2776,7 @@ async function submitGenerateContent() {
     usePromptTimerInterval = setInterval(() => {
         const sec = Math.floor((Date.now() - usePromptStartTime) / 1000);
         if (loadingTimer) {
-            loadingTimer.innerText = `Đang đợi phản hồi từ ${usePromptProvider === 'openai' ? 'OpenAI' : 'Gemini'} (${sec}s)...`;
+            loadingTimer.innerText = `Đang đợi phản hồi từ OpenAI (${sec}s)...`;
         }
     }, 500);
 
@@ -2880,7 +2866,7 @@ async function saveGeneratedContentToSample(showToastMessage = true) {
         return;
     }
 
-    const providerName = usePromptProvider === 'openai' ? 'OpenAI' : 'Gemini';
+    const providerName = 'OpenAI';
     const title = `Phản hồi AI (${providerName})`;
 
     try {
@@ -2949,32 +2935,12 @@ async function fetchProviderConfig() {
 }
 
 function setGenProvider(provider, notify = true) {
-    currentGenProvider = provider;
+    currentGenProvider = 'openai';
     const btnOpenAI = document.getElementById('btnProviderOpenAI');
-    const btnGemini = document.getElementById('btnProviderGemini');
     const badge = document.getElementById('genProviderInfoBadge');
 
-    if (provider === 'gemini') {
-        if (btnOpenAI) {
-            btnOpenAI.className = 'px-3 py-1.5 rounded-lg font-medium transition flex items-center gap-1.5 text-slate-400 hover:text-white';
-        }
-        if (btnGemini) {
-            btnGemini.className = 'px-3 py-1.5 rounded-lg font-medium transition flex items-center gap-1.5 bg-gradient-to-r from-amber-600 to-orange-600 text-white shadow';
-        }
-        if (badge) {
-            const imgModel = providerConfigCache?.gemini?.model || 'gemini-2.5-flash';
-            badge.innerText = `Google Gemini (${imgModel})`;
-            badge.className = 'text-[11px] font-mono px-2 py-0.5 rounded bg-amber-500/10 text-amber-300 border border-amber-500/30';
-        }
-        if (notify && providerConfigCache && !providerConfigCache.gemini.has_key) {
-            showGenError('Lưu ý: GEMINI_API_KEY chưa có giá trị trong .env. Vui lòng nhập API Key của Gemini vào .env trước khi tạo ảnh.');
-        }
-    } else {
         if (btnOpenAI) {
             btnOpenAI.className = 'px-3 py-1.5 rounded-lg font-medium transition flex items-center gap-1.5 bg-indigo-600 text-white shadow';
-        }
-        if (btnGemini) {
-            btnGemini.className = 'px-3 py-1.5 rounded-lg font-medium transition flex items-center gap-1.5 text-slate-400 hover:text-white';
         }
         if (badge) {
             const imgModel = providerConfigCache?.openai?.model || 'Custom Router';
@@ -3192,6 +3158,41 @@ function selectExistingImageAsRef(src) {
     document.getElementById('genErrorBanner').classList.add('hidden');
 }
 
+function handleGenRefImageUpload(event) {
+    const file = event.target.files && event.target.files[0];
+    if (!file) return;
+
+    if (!file.type.startsWith('image/')) {
+        showGenError('Vui lòng chọn tệp hình ảnh hợp lệ (PNG, JPG, WEBP).');
+        return;
+    }
+    if (file.size > 15 * 1024 * 1024) {
+        showGenError('Kích thước ảnh quá lớn (tối đa 15MB).');
+        return;
+    }
+
+    const reader = new FileReader();
+    reader.onload = (e) => {
+        currentRefImageData = e.target.result;
+        document.getElementById('genRefImagePreviewImg').src = currentRefImageData;
+        document.getElementById('genRefImageLabel').innerText = file.name;
+        document.getElementById('genRefImagePreview').classList.remove('hidden');
+        document.getElementById('genErrorBanner').classList.add('hidden');
+    };
+    reader.onerror = () => {
+        showGenError('Không thể đọc file ảnh.');
+    };
+    reader.readAsDataURL(file);
+}
+
+function clearGenRefImage() {
+    currentRefImageData = null;
+    document.getElementById('genRefImageUpload').value = '';
+    document.getElementById('genRefImageLabel').innerText = 'Tải ảnh tham chiếu lên';
+    document.getElementById('genRefImagePreview').classList.add('hidden');
+    document.getElementById('genErrorBanner').classList.add('hidden');
+}
+
 function showGenError(msg) {
     const banner = document.getElementById('genErrorBanner');
     const textEl = document.getElementById('genErrorText');
@@ -3239,7 +3240,7 @@ async function submitGenerateImage() {
     // Timer counter
     genTimerSeconds = 0;
     const timerEl = document.getElementById('genLoadingTimer');
-    const providerName = currentGenProvider === 'gemini' ? 'Google Gemini Official API' : 'Custom OpenAI Router';
+    const providerName = 'Custom OpenAI Router';
     if (timerEl) timerEl.innerText = `Đang kết nối tới ${providerName} (0s)...`;
     if (genTimerInterval) clearInterval(genTimerInterval);
     genTimerInterval = setInterval(() => {
@@ -3454,29 +3455,12 @@ let improveTimerSeconds = 0;
 let isOriginalPromptCollapsed = false;
 
 function setImproveProvider(provider) {
-    currentImproveProvider = provider;
+    currentImproveProvider = 'openai';
     const btnOpenAI = document.getElementById('btnImproveProviderOpenAI');
-    const btnGemini = document.getElementById('btnImproveProviderGemini');
     const badge = document.getElementById('improveProviderInfoBadge');
 
-    if (provider === 'gemini') {
-        if (btnOpenAI) {
-            btnOpenAI.className = 'px-3 py-1.5 rounded-lg font-medium transition flex items-center gap-1.5 text-slate-400 hover:text-white';
-        }
-        if (btnGemini) {
-            btnGemini.className = 'px-3 py-1.5 rounded-lg font-medium transition flex items-center gap-1.5 bg-gradient-to-r from-amber-600 to-orange-600 text-white shadow';
-        }
-        if (badge) {
-            const chatModel = providerConfigCache?.gemini?.chat_model || 'gemini-2.0-flash';
-            badge.innerText = `Google Gemini (${chatModel})`;
-            badge.className = 'text-[11px] font-mono px-2 py-0.5 rounded bg-amber-500/10 text-amber-300 border border-amber-500/30';
-        }
-    } else {
         if (btnOpenAI) {
             btnOpenAI.className = 'px-3 py-1.5 rounded-lg font-medium transition flex items-center gap-1.5 bg-emerald-600 text-white shadow';
-        }
-        if (btnGemini) {
-            btnGemini.className = 'px-3 py-1.5 rounded-lg font-medium transition flex items-center gap-1.5 text-slate-400 hover:text-white';
         }
         if (badge) {
             const chatModel = providerConfigCache?.openai?.chat_model || 'Custom Router';
@@ -5116,16 +5100,14 @@ function openSettingsModal() {
     document.getElementById('cfgMsg').textContent = '';
     // Load current config
     fetch('/api/config').then(r => r.json()).then(cfg => {
-        cfgProvider = cfg.provider || 'openai';
-        cfgSwitchProvider(cfgProvider);
+        cfgProvider = 'openai';
         document.getElementById('cfgBaseUrl').value = cfg.base_url || '';
-        document.getElementById('cfgModel').value = cfg.model || '';
-        document.getElementById('cfgGeminiModel').value = cfg.gemini_model || '';
+        document.getElementById('cfgChatModel').value = cfg.chat_model || cfg.model || '';
+        document.getElementById('cfgImageModel').value = cfg.image_model || '';
+        document.getElementById('cfgImageRefSupport').checked = cfg.image_reference_support || false;
         document.getElementById('cfgTimeout').value = cfg.timeout || 300;
         document.getElementById('cfgApiKey').value = '';
-        document.getElementById('cfgGeminiKey').value = '';
         document.getElementById('cfgApiKey').placeholder = cfg.has_api_key ? '••••••• (để trống = giữ nguyên)' : 'sk-...';
-        document.getElementById('cfgGeminiKey').placeholder = cfg.has_gemini_key ? '••••••• (để trống = giữ nguyên)' : 'AI...';
     }).catch(() => {});
 }
 
@@ -5133,30 +5115,15 @@ function closeSettingsModal() {
     document.getElementById('settingsModal').classList.add('hidden');
 }
 
-function cfgSwitchProvider(p) {
-    cfgProvider = p;
-    document.getElementById('cfgGrpOpenAI').classList.toggle('hidden', p !== 'openai');
-    document.getElementById('cfgGrpGemini').classList.toggle('hidden', p !== 'gemini');
-    const tabO = document.getElementById('cfgTabOpenAI');
-    const tabG = document.getElementById('cfgTabGemini');
-    if (p === 'openai') {
-        tabO.className = 'flex-1 px-3 py-2 rounded-lg text-xs font-semibold border border-brand-500 text-brand-400 bg-brand-500/10 transition';
-        tabG.className = 'flex-1 px-3 py-2 rounded-lg text-xs font-semibold border border-dark-600 text-slate-400 hover:text-white transition';
-    } else {
-        tabG.className = 'flex-1 px-3 py-2 rounded-lg text-xs font-semibold border border-amber-500 text-amber-400 bg-amber-500/10 transition';
-        tabO.className = 'flex-1 px-3 py-2 rounded-lg text-xs font-semibold border border-dark-600 text-slate-400 hover:text-white transition';
-    }
-}
-
 async function cfgSave() {
     const msg = document.getElementById('cfgMsg');
     const payload = {
-        provider: cfgProvider,
+        provider: 'openai',
         base_url: document.getElementById('cfgBaseUrl').value.trim(),
         api_key: document.getElementById('cfgApiKey').value.trim(),
-        model: document.getElementById('cfgModel').value.trim(),
-        gemini_api_key: document.getElementById('cfgGeminiKey').value.trim(),
-        gemini_model: document.getElementById('cfgGeminiModel').value.trim(),
+        chat_model: document.getElementById('cfgChatModel').value.trim(),
+        image_model: document.getElementById('cfgImageModel').value.trim(),
+        image_reference_support: document.getElementById('cfgImageRefSupport').checked,
         timeout: parseInt(document.getElementById('cfgTimeout').value) || 300,
         stream: true,
     };

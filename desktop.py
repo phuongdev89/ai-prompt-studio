@@ -85,7 +85,6 @@ def _setup_html(port: int) -> str:
 
   <div class="tabs">
     <div class="tab active" onclick="switchProvider('openai')" id="tabOpenAI">Custom OpenAI</div>
-    <div class="tab" onclick="switchProvider('gemini')" id="tabGemini">Google Gemini</div>
   </div>
 
   <div class="group active" id="grpOpenAI">
@@ -99,15 +98,6 @@ def _setup_html(port: int) -> str:
     <label>Model</label>
     <input id="model" placeholder="gpt-4o-mini" value="gpt-4o-mini">
     <p class="hint">Một model duy nhất dùng cho chat, tạo ảnh và mọi tác vụ AI.</p>
-  </div>
-
-  <div class="group" id="grpGemini">
-    <label>Gemini API Key</label>
-    <input id="geminiKey" type="password" placeholder="AI...">
-    <p class="hint">Lấy tại <a href="https://aistudio.google.com/apikey" target="_blank" style="color:#22d3ee">Google AI Studio</a></p>
-
-    <label>Model</label>
-    <input id="geminiModel" placeholder="gemini-2.5-flash" value="gemini-2.5-flash">
   </div>
 
   <div class="row" style="margin-top:14px">
@@ -125,11 +115,7 @@ def _setup_html(port: int) -> str:
 let provider = 'openai';
 
 function switchProvider(p) {{
-  provider = p;
-  document.getElementById('grpOpenAI').classList.toggle('active', p === 'openai');
-  document.getElementById('grpGemini').classList.toggle('active', p === 'gemini');
-  document.getElementById('tabOpenAI').classList.toggle('active', p === 'openai');
-  document.getElementById('tabGemini').classList.toggle('active', p === 'gemini');
+  provider = 'openai';
 }}
 
 async function doStart() {{
@@ -141,28 +127,19 @@ async function doStart() {{
   msg.textContent = '';
 
   const payload = {{
-    provider: provider,
+    provider: 'openai',
     base_url: document.getElementById('baseUrl').value.trim(),
     api_key: document.getElementById('apiKey').value.trim(),
     model: document.getElementById('model').value.trim() || 'gpt-4o-mini',
-    gemini_api_key: document.getElementById('geminiKey').value.trim(),
-    gemini_model: document.getElementById('geminiModel').value.trim() || 'gemini-2.5-flash',
     timeout: parseInt(document.getElementById('timeout').value) || 300,
     stream: true,
     setup_done: true,
   }};
 
   // Validate
-  if (provider === 'openai' && !payload.api_key) {{
+  if (!payload.api_key) {{
     msg.className = 'msg err';
     msg.textContent = 'Vui lòng nhập API Key cho OpenAI.';
-    btn.disabled = false;
-    btn.textContent = 'Bắt đầu sử dụng';
-    return;
-  }}
-  if (provider === 'gemini' && !payload.gemini_api_key) {{
-    msg.className = 'msg err';
-    msg.textContent = 'Vui lòng nhập API Key cho Google Gemini.';
     btn.disabled = false;
     btn.textContent = 'Bắt đầu sử dụng';
     return;
@@ -201,14 +178,11 @@ async function doStart() {{
   try {{
     const resp = await fetch('http://127.0.0.1:{port}/api/config');
     const cfg = await resp.json();
-    if (cfg.provider === 'gemini') switchProvider('gemini');
     if (cfg.base_url) document.getElementById('baseUrl').value = cfg.base_url;
     if (cfg.model) document.getElementById('model').value = cfg.model;
-    if (cfg.gemini_model) document.getElementById('geminiModel').value = cfg.gemini_model;
     if (cfg.timeout) document.getElementById('timeout').value = cfg.timeout;
     // Keys are masked — don't prefill, but show hint
     if (cfg.has_api_key) document.getElementById('apiKey').placeholder = '••••••• (đã lưu, để trống = giữ nguyên)';
-    if (cfg.has_gemini_key) document.getElementById('geminiKey').placeholder = '••••••• (đã lưu, để trống = giữ nguyên)';
   }} catch(e) {{}}
 }})();
 </script>

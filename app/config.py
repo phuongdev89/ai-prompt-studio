@@ -43,12 +43,13 @@ def find_free_port() -> int:
 # ============================================================
 
 _DEFAULT_CONFIG = {
-    "provider": "openai",       # 'openai' or 'gemini'
+    "provider": "openai",
     "base_url": "https://api.openai.com/v1",
     "api_key": "",
     "model": "gpt-4o-mini",
-    "gemini_api_key": "",
-    "gemini_model": "gemini-2.5-flash",
+    "chat_model": "gpt-4o-mini",
+    "image_model": "cx/gpt-5.6-sol-image",
+    "image_reference_support": False,
     "timeout": 300,
     "stream": True,
     "setup_done": False,
@@ -75,30 +76,30 @@ def get_ai_config() -> dict:
     merged = {**_DEFAULT_CONFIG, **saved}
 
     # Strip whitespace from string values
-    for k in ("provider", "base_url", "api_key", "model", "gemini_api_key", "gemini_model"):
+    for k in ("provider", "base_url", "api_key", "model", "chat_model", "image_model"):
         if isinstance(merged.get(k), str):
             merged[k] = merged[k].strip().strip('"').strip("'")
 
-    if merged["provider"] == "openai" and merged.get("base_url"):
+    if merged.get("base_url"):
         merged["base_url"] = merged["base_url"].rstrip("/")
 
-    # Backward compat aliases — single model for everything
-    merged["chat_model"] = merged["model"]
-    merged["model_name"] = merged["model"]
-    merged["image_model"] = merged["model"]
-    merged["gemini_chat_model"] = merged["gemini_model"]
-    merged["gemini_image_model"] = merged["gemini_model"]
+    # Fallbacks: chat_model -> model, image_model -> chat_model -> model
+    if not merged.get("chat_model"):
+        merged["chat_model"] = merged.get("model", "gpt-4o-mini")
+    if not merged.get("image_model"):
+        merged["image_model"] = merged.get("chat_model") or merged.get("model", "gpt-4o-mini")
+    merged["model_name"] = merged["chat_model"]
     return merged
 
 
 def save_ai_config(cfg: dict):
     """Save AI config to config.json. Only persists known keys.
-    Empty string for api_key/gemini_api_key means keep existing value."""
+    Empty string for api_key means keep existing value."""
     current = _load_config_file()
     for k in _DEFAULT_CONFIG:
         if k in cfg:
             # Don't overwrite existing keys with empty string
-            if k in ("api_key", "gemini_api_key") and not cfg[k]:
+            if k == "api_key" and not cfg[k]:
                 continue
             current[k] = cfg[k]
     current["setup_done"] = True

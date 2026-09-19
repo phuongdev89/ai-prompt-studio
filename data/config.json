@@ -2,8 +2,9 @@
   "provider": "openai",
   "base_url": "https://9router.phuonganh.io.vn/v1",
   "api_key": "sk-9ed7f1126d3b6b57-h979qz-a9c376f8",
-  "model": "ag/gemini-3.7-flash-high",
-  "gemini_model": "gemini-2.5-flash",
+  "chat_model": "ag/gemini-3.7-flash-high",
+  "image_model": "cx/gpt-5.6-sol-image",
+  "image_reference_support": true,
   "timeout": 300,
   "stream": true,
   "setup_done": true
