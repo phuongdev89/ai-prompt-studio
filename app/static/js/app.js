@@ -2939,14 +2939,13 @@ function setGenProvider(provider, notify = true) {
     const btnOpenAI = document.getElementById('btnProviderOpenAI');
     const badge = document.getElementById('genProviderInfoBadge');
 
-        if (btnOpenAI) {
-            btnOpenAI.className = 'px-3 py-1.5 rounded-lg font-medium transition flex items-center gap-1.5 bg-indigo-600 text-white shadow';
-        }
-        if (badge) {
-            const imgModel = providerConfigCache?.openai?.model || 'Custom Router';
-            badge.innerText = `Custom OpenAI (${imgModel})`;
-            badge.className = 'text-[11px] font-mono px-2 py-0.5 rounded bg-indigo-500/10 text-indigo-300 border border-indigo-500/30';
-        }
+    if (btnOpenAI) {
+        btnOpenAI.className = 'px-3 py-1.5 rounded-lg font-medium transition flex items-center gap-1.5 bg-indigo-600 text-white shadow';
+    }
+    if (badge) {
+        const imgModel = providerConfigCache?.openai?.model || 'Custom Router';
+        badge.innerText = `Custom OpenAI (${imgModel})`;
+        badge.className = 'text-[11px] font-mono px-2 py-0.5 rounded bg-indigo-500/10 text-indigo-300 border border-indigo-500/30';
     }
 }
 
@@ -3459,14 +3458,13 @@ function setImproveProvider(provider) {
     const btnOpenAI = document.getElementById('btnImproveProviderOpenAI');
     const badge = document.getElementById('improveProviderInfoBadge');
 
-        if (btnOpenAI) {
-            btnOpenAI.className = 'px-3 py-1.5 rounded-lg font-medium transition flex items-center gap-1.5 bg-emerald-600 text-white shadow';
-        }
-        if (badge) {
-            const chatModel = providerConfigCache?.openai?.chat_model || 'Custom Router';
-            badge.innerText = `Custom OpenAI (${chatModel})`;
-            badge.className = 'text-[11px] font-mono px-2 py-0.5 rounded bg-emerald-500/10 text-emerald-300 border border-emerald-500/30';
-        }
+    if (btnOpenAI) {
+        btnOpenAI.className = 'px-3 py-1.5 rounded-lg font-medium transition flex items-center gap-1.5 bg-emerald-600 text-white shadow';
+    }
+    if (badge) {
+        const chatModel = providerConfigCache?.openai?.chat_model || 'Custom Router';
+        badge.innerText = `Custom OpenAI (${chatModel})`;
+        badge.className = 'text-[11px] font-mono px-2 py-0.5 rounded bg-emerald-500/10 text-emerald-300 border border-emerald-500/30';
     }
 }
 
@@ -5139,7 +5137,7 @@ async function cfgSave() {
             msg.textContent = 'Đã lưu cấu hình thành công!';
             showToast('Đã lưu cấu hình AI!');
             // Refresh provider cache
-            if (typeof loadProviderConfig === 'function') loadProviderConfig();
+            await fetchProviderConfig();
         }
     } catch (e) {
         msg.className = 'text-xs text-center min-h-[16px] text-red-400';

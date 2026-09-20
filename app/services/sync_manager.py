@@ -176,21 +176,24 @@ def pull_data() -> dict:
 
 def _download_images_bg(image_urls: list):
     """Tải ảnh ngầm, lưu vào data/images/ và cập nhật DB."""
-    from app.services.downloader import download_image
+    from app.services.downloader import download_media_file
+    pending = []
     with get_db() as conn:
         cursor = conn.cursor()
         for prompt_id, url, order_idx in image_urls:
-            try:
-                result = download_image(url, str(IMAGES_DIR))
-                if result:
-                    filename = os.path.basename(result)
-                    cursor.execute("""
-                        INSERT INTO images (prompt_id, url, local_path, filename, status, order_index)
-                        VALUES (?, ?, ?, ?, 'downloaded', ?)
-                    """, (prompt_id, url, f"data/images/{filename}", filename, order_idx))
-            except Exception:
-                cursor.execute("""
-                    INSERT INTO images (prompt_id, url, status, order_index)
-                    VALUES (?, ?, 'failed', ?)
-                """, (prompt_id, url, order_idx))
+            cursor.execute("""
+                INSERT INTO images (prompt_id, url, status, order_index)
+                VALUES (?, ?, 'pending', ?)
+            """, (prompt_id, url, order_idx))
+            pending.append((cursor.lastrowid, prompt_id, url))
         conn.commit()
+
+    # The downloader updates each existing row using its own connection.
+    # Commit and release the write transaction before invoking it.
+    for image_id, prompt_id, url in pending:
+        try:
+            download_media_file(image_id, prompt_id, url)
+        except Exception:
+            with get_db() as conn:
+                conn.execute("UPDATE images SET status = 'failed' WHERE id = ?", (image_id,))
+                conn.commit()

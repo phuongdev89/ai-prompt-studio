@@ -164,19 +164,6 @@ def call_ai_generate_image(
     format_type: 'url', 'base64', 'svg'
     """
     cfg = get_ai_config()
-    active_provider = "openai"
-
-    # OpenAI-compatible generation logic
-    return call_openai_compatible_generate_image(
-        prompt_text=prompt_text,
-            reference_image=reference_image,
-            extra_description=extra_description,
-            size=size,
-            quality=quality,
-            image_detail=image_detail,
-            cfg=cfg
-        )
-
     api_key = cfg.get("api_key", "")
     base_url = cfg.get("base_url") or "https://api.openai.com/v1"
     # Use configured image model with priority: image_model > chat_model > model > default
@@ -185,7 +172,7 @@ def call_ai_generate_image(
     image_ref_support = cfg.get("image_reference_support", False)
 
     if not api_key:
-        return False, None, None, "Chưa cấu hình AI_API_KEY trong tệp .env. Vui lòng cấu hình API Key để tạo ảnh."
+        return False, None, None, "Chưa cấu hình API Key. Vui lòng mở Cài đặt để cấu hình API Key tạo ảnh."
 
     # Validate parameters
     size = size.strip() if size else "1024x1024"
