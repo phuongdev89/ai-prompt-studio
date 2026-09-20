@@ -65,6 +65,9 @@ class GenerateImageRequest(BaseModel):
     image_detail: Optional[str] = Field("high", description="Mức độ bám sát chi tiết ảnh tham chiếu")
     provider: Optional[str] = Field(None, description="Nhà cung cấp: 'openai'")
 
+class UploadReferenceImageRequest(BaseModel):
+    image: str = Field(..., description="Ảnh tham chiếu dạng data:image/...;base64,...")
+
 class SaveGeneratedImageRequest(BaseModel):
     image_data: str = Field(..., description="URL hoặc Base64 ảnh đã tạo")
 
@@ -221,6 +224,22 @@ def toggle_prompt_reference_endpoint(prompt_id: str, payload: Dict[str, Any] = B
         "requires_reference": new_val,
         "message": "Đã bật yêu cầu ảnh tham chiếu" if new_val else "Đã tắt yêu cầu ảnh tham chiếu"
     }
+
+@router.post("/reference-images/upload")
+def upload_reference_image_endpoint(payload: UploadReferenceImageRequest):
+    """Upload immediately after selection and return a 1-hour signed URL."""
+    from app.config import get_ai_config
+    from app.services.s3_storage import upload_reference_image
+
+    cfg = get_ai_config()
+    if not cfg.get("s3_enabled"):
+        raise HTTPException(status_code=409, detail="S3-compatible storage chưa được bật.")
+    try:
+        return {"url": upload_reference_image(payload.image, cfg), "expires_in": 3600}
+    except (ValueError, RuntimeError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"Không thể tải ảnh lên S3: {exc}") from exc
 
 @router.delete("/prompts/{prompt_id}")
 @router.delete("/prompts/{prompt_id}/")
@@ -800,6 +819,14 @@ def get_config():
         "chat_model": cfg.get("chat_model"),
         "image_model": cfg.get("image_model"),
         "image_reference_support": cfg.get("image_reference_support", False),
+        "s3_enabled": cfg.get("s3_enabled", False),
+        "s3_endpoint_url": cfg.get("s3_endpoint_url", ""),
+        "s3_region": cfg.get("s3_region", "auto"),
+        "s3_bucket": cfg.get("s3_bucket", ""),
+        "s3_key_prefix": cfg.get("s3_key_prefix", "references"),
+        "s3_access_key_id": cfg.get("s3_access_key_id", ""),
+        "has_s3_access_key": bool(cfg.get("s3_access_key_id")),
+        "has_s3_secret": bool(cfg.get("s3_secret_access_key")),
         "timeout": cfg.get("timeout"),
         "stream": cfg.get("stream"),
         "setup_done": is_setup_done(),

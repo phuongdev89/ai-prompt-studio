@@ -52,6 +52,13 @@ _DEFAULT_CONFIG = {
     "image_reference_support": False,
     "timeout": 300,
     "stream": True,
+    "s3_enabled": False,
+    "s3_endpoint_url": "",
+    "s3_region": "auto",
+    "s3_bucket": "",
+    "s3_access_key_id": "",
+    "s3_secret_access_key": "",
+    "s3_key_prefix": "references",
     "setup_done": False,
 }
 
@@ -76,12 +83,16 @@ def get_ai_config() -> dict:
     merged = {**_DEFAULT_CONFIG, **saved}
 
     # Strip whitespace from string values
-    for k in ("provider", "base_url", "api_key", "model", "chat_model", "image_model"):
+    for k in ("provider", "base_url", "api_key", "model", "chat_model", "image_model",
+              "s3_endpoint_url", "s3_region", "s3_bucket", "s3_access_key_id",
+              "s3_secret_access_key", "s3_key_prefix"):
         if isinstance(merged.get(k), str):
             merged[k] = merged[k].strip().strip('"').strip("'")
 
     if merged.get("base_url"):
         merged["base_url"] = merged["base_url"].rstrip("/")
+    if merged.get("s3_endpoint_url"):
+        merged["s3_endpoint_url"] = merged["s3_endpoint_url"].rstrip("/")
 
     # Fallbacks: chat_model -> model, image_model -> chat_model -> model
     if not merged.get("chat_model"):
@@ -99,7 +110,7 @@ def save_ai_config(cfg: dict):
     for k in _DEFAULT_CONFIG:
         if k in cfg:
             # Don't overwrite existing keys with empty string
-            if k == "api_key" and not cfg[k]:
+            if k in ("api_key", "s3_secret_access_key") and not cfg[k]:
                 continue
             current[k] = cfg[k]
     current["setup_done"] = True

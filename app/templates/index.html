@@ -1170,7 +1170,7 @@
                             </button>
                         </div>
                     </div>
-                    <p class="text-[11px] text-slate-400">Ảnh sẽ được chuyển sang Base64 và gửi kèm với câu lệnh (yêu cầu bật "Hỗ trợ tham chiếu" trong cấu hình)</p>
+                    <p class="text-[11px] text-slate-400">Ảnh sẽ được tải lên S3 và gửi kèm với câu lệnh (yêu cầu bật "Hỗ trợ tham chiếu" trong cấu hình)</p>
                 </div>
 
                 <!-- Parameters: Size & Quality (Cân đối 2 cột) -->
@@ -1720,7 +1720,7 @@
 
     <!-- Settings / Config Modal -->
     <div id="settingsModal" class="fixed inset-0 bg-black/70 backdrop-blur-sm z-[100] hidden flex items-center justify-center p-4">
-        <div class="bg-dark-800 border border-dark-600 rounded-2xl shadow-2xl w-full max-w-lg p-6 space-y-4">
+        <div class="bg-dark-800 border border-dark-600 rounded-2xl shadow-2xl w-full max-w-lg max-h-[90vh] overflow-y-auto p-6 space-y-4">
             <div class="flex items-center justify-between">
                 <h3 class="text-lg font-bold text-white flex items-center gap-2">
                     <i class="fa-solid fa-gear text-brand-500"></i>
@@ -1743,6 +1743,22 @@
                     <input type="checkbox" id="cfgImageRefSupport" class="w-4 h-4 rounded border-dark-600 bg-dark-900 text-brand-500 focus:ring-brand-500">
                     <span class="text-xs text-slate-400">Hỗ trợ tham chiếu</span>
                 </label>
+            </div>
+
+            <div class="border-t border-dark-700 pt-3">
+                <label class="flex items-center gap-2 cursor-pointer">
+                    <input type="checkbox" id="cfgS3Enabled" class="w-4 h-4 rounded border-dark-600 bg-dark-900 text-brand-500 focus:ring-brand-500">
+                    <span class="text-xs text-slate-400">Upload ảnh tham chiếu lên S3-compatible trước khi gửi</span>
+                </label>
+                <div class="grid grid-cols-2 gap-2 mt-2">
+                    <input id="cfgS3Endpoint" class="w-full px-3 py-2 rounded-lg bg-dark-900 border border-dark-600 text-xs text-white" placeholder="S3 endpoint URL">
+                    <input id="cfgS3Region" class="w-full px-3 py-2 rounded-lg bg-dark-900 border border-dark-600 text-xs text-white" placeholder="Region (auto)">
+                    <input id="cfgS3Bucket" class="w-full px-3 py-2 rounded-lg bg-dark-900 border border-dark-600 text-xs text-white" placeholder="Bucket">
+                    <input id="cfgS3Prefix" class="w-full px-3 py-2 rounded-lg bg-dark-900 border border-dark-600 text-xs text-white" placeholder="Key prefix (references)">
+                    <input id="cfgS3AccessKey" class="w-full px-3 py-2 rounded-lg bg-dark-900 border border-dark-600 text-xs text-white" placeholder="Access key ID">
+                    <input id="cfgS3SecretKey" type="password" class="w-full px-3 py-2 rounded-lg bg-dark-900 border border-dark-600 text-xs text-white" placeholder="Secret access key">
+                </div>
+                <p class="text-[11px] text-slate-500 mt-1">Bucket có thể private: hệ thống tạo presigned URL đọc ảnh, có hiệu lực 1 giờ, sau mỗi lần chọn ảnh.</p>
             </div>
 
             <div>

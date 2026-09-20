@@ -109,309 +109,82 @@ def extract_image_from_text(text: str) -> Optional[Tuple[str, str]]:
     return None
 
 def call_openai_images_generations(
-    base_url: str,
-    api_key: str,
-    model_name: str,
-    prompt: str,
-    timeout: int
+    base_url: str, api_key: str, model_name: str, prompt: str, timeout: int,
+    reference_image: Optional[str] = None, image_detail: str = "high",
 ) -> Optional[str]:
-    """Attempts to call standard /images/generations endpoint."""
+    """Call the tested router contract and parse JSON or SSE output."""
     endpoint = f"{base_url.rstrip('/')}/images/generations"
     headers = {
         "Content-Type": "application/json",
-        "Authorization": f"Bearer {api_key}"
+        "Authorization": f"Bearer {api_key}",
+        "Accept": "text/event-stream",
     }
     payload = {
-        "model": model_name,
-        "prompt": prompt,
-        "n": 1,
-        "size": "1024x1024",
-        "output_format": "png"
+        "model": model_name, "prompt": prompt, "n": 1,
+        "size": "auto", "quality": "auto", "background": "auto",
+        "image_detail": image_detail or "high", "output_format": "png",
     }
-
+    if reference_image:
+        payload["image"] = reference_image
     ctx = ssl.create_default_context()
     ctx.check_hostname = False
     ctx.verify_mode = ssl.CERT_NONE
-
     try:
         req = urllib.request.Request(endpoint, data=json.dumps(payload).encode("utf-8"), headers=headers)
-        with urllib.request.urlopen(req, timeout=min(timeout, 30), context=ctx) as resp:
+        with urllib.request.urlopen(req, timeout=timeout, context=ctx) as resp:
             body = resp.read().decode("utf-8", errors="ignore")
-            data = json.loads(body)
-            if "data" in data and len(data["data"]) > 0:
+        candidates = [body] + [
+            line[5:].strip() for line in body.splitlines()
+            if line.startswith("data:") and line[5:].strip() not in ("", "[DONE]")
+        ]
+        for candidate in reversed(candidates):
+            try:
+                data = json.loads(candidate)
+            except (TypeError, json.JSONDecodeError):
+                extracted = extract_image_from_text(candidate)
+                if extracted:
+                    return extracted[0]
+                continue
+            if isinstance(data, dict) and data.get("data"):
                 first = data["data"][0]
-                if "url" in first:
+                if first.get("url"):
                     return first["url"]
-                if "b64_json" in first:
+                if first.get("b64_json"):
                     return f"data:image/png;base64,{first['b64_json']}"
-    except Exception as e:
-        # Ignore and let caller fallback
-        pass
+            extracted = extract_image_from_text(json.dumps(data, ensure_ascii=False))
+            if extracted:
+                return extracted[0]
+    except Exception:
+        return None
     return None
 
+
 def call_ai_generate_image(
-    prompt_text: str,
-    reference_image: Optional[str] = None,
-    extra_description: Optional[str] = None,
-    size: str = "1024x1024",
-    quality: str = "hd",
-    image_detail: str = "high",
-    provider: Optional[str] = None
+    prompt_text: str, reference_image: Optional[str] = None,
+    extra_description: Optional[str] = None, size: str = "1024x1024",
+    quality: str = "hd", image_detail: str = "high",
+    provider: Optional[str] = None,
 ) -> Tuple[bool, Optional[str], Optional[str], str]:
-    """
-    Calls configured AI to generate an image using OpenAI-compatible API.
-    Returns: (success, image_result, format_type, message)
-    format_type: 'url', 'base64', 'svg'
-    """
     cfg = get_ai_config()
     api_key = cfg.get("api_key", "")
     base_url = cfg.get("base_url") or "https://api.openai.com/v1"
-    # Use configured image model with priority: image_model > chat_model > model > default
     model_name = cfg.get("image_model") or cfg.get("chat_model") or cfg.get("model") or "gpt-4o-mini"
-    timeout = cfg.get("timeout", 300)
-    image_ref_support = cfg.get("image_reference_support", False)
-
+    timeout = int(cfg.get("timeout", 300))
     if not api_key:
-        return False, None, None, "Chưa cấu hình API Key. Vui lòng mở Cài đặt để cấu hình API Key tạo ảnh."
-
-    # Validate parameters
-    size = size.strip() if size else "1024x1024"
-    quality = quality.strip() if quality else "hd"
-    image_detail = image_detail.strip() if image_detail else "high"
-
-    # Build composite prompt
-    prompt_parts = []
-    if prompt_text and prompt_text.strip():
-        prompt_parts.append(prompt_text.strip())
-
+        return False, None, None, "Chưa cấu hình API key"
+    parts = [prompt_text.strip()]
     if extra_description and extra_description.strip():
-        prompt_parts.append(f"\n[Yêu cầu & Mô tả phụ]: {extra_description.strip()}")
+        parts.append(f"[Yêu cầu phụ]: {extra_description.strip()}")
+    full_prompt = "\n\n".join(parts)
+    image_source = call_openai_images_generations(
+        base_url, api_key, model_name, full_prompt, timeout,
+        reference_image=reference_image, image_detail=image_detail,
+    )
+    if not image_source:
+        return False, None, None, "API tạo ảnh không trả về ảnh hợp lệ"
+    fmt = "base64" if image_source.startswith("data:image/") else "url"
+    return True, image_source, fmt, f"Sinh ảnh thành công bằng {model_name}"
 
-    prompt_parts.append(f"\n[Thông số kỹ thuật]: Kích thước ảnh: {size}, Chất lượng: {quality}.")
-
-    if reference_image:
-        prompt_parts.append("\n[LƯU Ý QUAN TRỌNG VỀ ẢNH THAM CHIẾU]: BẮT BUỘC giữ nguyên nhận diện nhân vật, diện mạo khuôn mặt, màu sắc và phong cách từ ảnh tham chiếu đính kèm. Hãy tạo hình ảnh mới với nhân vật/chủ thể trong ảnh tham chiếu theo đúng câu lệnh.")
-
-    combined_prompt = "\n\n".join(prompt_parts)
-
-    ctx = ssl.create_default_context()
-    ctx.check_hostname = False
-    ctx.verify_mode = ssl.CERT_NONE
-
-    chat_endpoint = f"{base_url.rstrip('/')}/chat/completions"
-    image_endpoint = f"{base_url.rstrip('/')}/images/generations"
-
-    # STRATEGY:
-    # A. If reference_image is provided -> Prioritize /chat/completions with Multimodal Vision (image_url)
-    # because vision LLMs inspect the actual image pixels and generate conditioned on it!
-    # B. If NO reference_image -> Prioritize standard /images/generations endpoint!
-
-    if reference_image:
-        # If image_reference_support is enabled, use /images/generations with image field directly
-        if image_ref_support:
-            try:
-                # Extract base64 from data URL if needed
-                ref_image_b64 = reference_image
-                if reference_image.startswith("data:image"):
-                    # Strip data URL prefix to get bare base64
-                    if "base64," in reference_image:
-                        ref_image_b64 = reference_image.split("base64,", 1)[1]
-
-                img_headers = {
-                    "Content-Type": "application/json",
-                    "Authorization": f"Bearer {api_key}"
-                }
-                img_payload = {
-                    "model": model_name,
-                    "prompt": combined_prompt,
-                    "n": 1,
-                    "size": size,
-                    "quality": quality,
-                    "image": ref_image_b64
-                }
-                req = urllib.request.Request(
-                    image_endpoint,
-                    data=json.dumps(img_payload).encode("utf-8"),
-                    headers=img_headers
-                )
-                with urllib.request.urlopen(req, timeout=timeout, context=ctx) as resp:
-                    data = json.loads(resp.read().decode("utf-8", errors="ignore"))
-                    if "data" in data and len(data["data"]) > 0:
-                        first = data["data"][0]
-                        if "url" in first and first["url"]:
-                            return True, first["url"], "url", f"Sinh ảnh thành công theo ảnh tham chiếu từ {model_name}"
-                        if "b64_json" in first and first["b64_json"]:
-                            return True, format_b64_image(first['b64_json']), "base64", f"Sinh ảnh thành công theo ảnh tham chiếu từ {model_name}"
-            except Exception as e:
-                return False, None, None, f"Lỗi tạo ảnh với hỗ trợ tham chiếu: {str(e)}"
-
-        # Otherwise, fall back to multimodal chat completion
-        multimodal_headers = {
-            "Content-Type": "application/json",
-            "Authorization": f"Bearer {api_key}"
-        }
-        multimodal_system = (
-            f"You are an expert AI visual artist and image generator. "
-            f"A reference image has been provided with detail level '{image_detail}'. "
-            f"You MUST carefully analyze and preserve the subject's exact identity, facial structure, skin tone, hair, and visual style from the reference image. "
-            f"Generate and render a complete new visual image matching the prompt at {size} resolution and {quality} quality. "
-            f"Output the resulting image directly as markdown `![image](data:image/...;base64,...)` or direct URL."
-        )
-        multimodal_payload = {
-            "model": model_name,
-            "messages": [
-                {"role": "system", "content": multimodal_system},
-                {
-                    "role": "user",
-                    "content": [
-                        {"type": "text", "text": combined_prompt},
-                        {"type": "image_url", "image_url": {"url": reference_image, "detail": image_detail}}
-                    ]
-                }
-            ],
-            "temperature": 0.6,
-            "stream": False
-        }
-
-        multimodal_error = None
-        try:
-            req = urllib.request.Request(
-                chat_endpoint,
-                data=json.dumps(multimodal_payload).encode("utf-8"),
-                headers=multimodal_headers
-            )
-            with urllib.request.urlopen(req, timeout=timeout, context=ctx) as resp:
-                body = resp.read().decode("utf-8", errors="ignore")
-                data = json.loads(body)
-                raw_chat_text = ""
-                if "choices" in data and len(data["choices"]) > 0:
-                    raw_chat_text = data["choices"][0].get("message", {}).get("content", "")
-                elif "data" in data and len(data["data"]) > 0:
-                    first = data["data"][0]
-                    if "url" in first:
-                        return True, first["url"], "url", f"Sinh ảnh thành công theo ảnh tham chiếu từ {model_name}"
-                    if "b64_json" in first:
-                        return True, format_b64_image(first['b64_json']), "base64", f"Sinh ảnh thành công theo ảnh tham chiếu từ {model_name}"
-
-                extracted = extract_image_from_text(raw_chat_text)
-                if extracted:
-                    img_src, fmt = extracted
-                    return True, img_src, fmt, f"Sinh ảnh thành công theo ảnh tham chiếu từ {model_name}"
-        except Exception as e:
-            multimodal_error = str(e)
-
-        # 2. Fallback: try /images/generations with image field
-        try:
-            img_payload = {
-                "model": model_name,
-                "prompt": combined_prompt,
-                "n": 1,
-                "size": size,
-                "quality": quality,
-                "image": reference_image,
-                "init_images": [reference_image]
-            }
-            req = urllib.request.Request(
-                image_endpoint,
-                data=json.dumps(img_payload).encode("utf-8"),
-                headers=multimodal_headers
-            )
-            with urllib.request.urlopen(req, timeout=timeout, context=ctx) as resp:
-                data = json.loads(resp.read().decode("utf-8", errors="ignore"))
-                if "data" in data and len(data["data"]) > 0:
-                    first = data["data"][0]
-                    if "url" in first and first["url"]:
-                        return True, first["url"], "url", f"Sinh ảnh thành công từ {model_name}"
-                    if "b64_json" in first and first["b64_json"]:
-                        return True, format_b64_image(first['b64_json']), "base64", f"Sinh ảnh thành công từ {model_name}"
-        except Exception as e:
-            pass
-
-        return False, None, None, f"Không thể tạo ảnh theo ảnh tham chiếu từ {model_name}. Lỗi: {multimodal_error or 'AI không phản hồi dữ liệu ảnh'}"
-
-    else:
-        # NO reference image: Call standard /images/generations first
-        image_headers = {
-            "Content-Type": "application/json",
-            "Authorization": f"Bearer {api_key}"
-        }
-        image_payload = {
-            "model": model_name,
-            "prompt": combined_prompt,
-            "n": 1,
-            "size": size,
-            "quality": quality
-        }
-
-        image_api_error = None
-        try:
-            req = urllib.request.Request(
-                image_endpoint,
-                data=json.dumps(image_payload).encode("utf-8"),
-                headers=image_headers
-            )
-            with urllib.request.urlopen(req, timeout=timeout, context=ctx) as resp:
-                body = resp.read().decode("utf-8", errors="ignore")
-                data = json.loads(body)
-                if "data" in data and len(data["data"]) > 0:
-                    first = data["data"][0]
-                    if "url" in first and first["url"]:
-                        return True, first["url"], "url", f"Sinh ảnh thành công từ {model_name}"
-                    if "b64_json" in first and first["b64_json"]:
-                        return True, format_b64_image(first['b64_json']), "base64", f"Sinh ảnh thành công từ {model_name}"
-                if "url" in data and data["url"]:
-                    return True, data["url"], "url", f"Sinh ảnh thành công từ {model_name}"
-                if "images" in data and len(data["images"]) > 0:
-                    img0 = data["images"][0]
-                    if isinstance(img0, str):
-                        if img0.startswith("http"):
-                            return True, img0, "url", f"Sinh ảnh thành công từ {model_name}"
-                        return True, format_b64_image(img0), "base64", f"Sinh ảnh thành công từ {model_name}"
-        except urllib.error.HTTPError as e:
-            err_msg = e.read().decode("utf-8", errors="ignore")
-            image_api_error = f"Lỗi HTTP {e.code} từ /images/generations: {err_msg[:300]}"
-        except (urllib.error.URLError, TimeoutError) as e:
-            image_api_error = f"Lỗi kết nối tới /images/generations (Timeout {timeout}s): {str(e)}"
-        except Exception as e:
-            image_api_error = f"Lỗi gọi /images/generations: {str(e)}"
-
-        # Secondary fallback for text-to-image: /chat/completions
-        try:
-            chat_payload = {
-                "model": model_name,
-                "messages": [
-                    {"role": "system", "content": f"You are an expert AI image generator. Render the requested image at {size} resolution and {quality} quality. Output the image directly."},
-                    {"role": "user", "content": combined_prompt}
-                ],
-                "temperature": 0.7,
-                "stream": False
-            }
-            req = urllib.request.Request(
-                chat_endpoint,
-                data=json.dumps(chat_payload).encode("utf-8"),
-                headers=image_headers
-            )
-            with urllib.request.urlopen(req, timeout=timeout, context=ctx) as resp:
-                body = resp.read().decode("utf-8", errors="ignore")
-                data = json.loads(body)
-                raw_chat_text = ""
-                if "choices" in data and len(data["choices"]) > 0:
-                    raw_chat_text = data["choices"][0].get("message", {}).get("content", "")
-                elif "data" in data and len(data["data"]) > 0:
-                    first = data["data"][0]
-                    if "url" in first:
-                        return True, first["url"], "url", f"Sinh ảnh thành công từ {model_name}"
-                    if "b64_json" in first:
-                        return True, format_b64_image(first['b64_json']), "base64", f"Sinh ảnh thành công từ {model_name}"
-
-                extracted = extract_image_from_text(raw_chat_text)
-                if extracted:
-                    img_src, fmt = extracted
-                    return True, img_src, fmt, f"Sinh ảnh thành công từ {model_name}"
-        except Exception:
-            pass
-
-        return False, None, None, image_api_error or f"Không nhận được ảnh từ mô hình {model_name}."
 
 def save_generated_image_to_prompt(prompt_id: str, image_data_or_url: str) -> Tuple[bool, Optional[str], str]:
     """

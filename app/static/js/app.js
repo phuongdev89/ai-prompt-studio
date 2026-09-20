@@ -2914,6 +2914,7 @@ async function saveGeneratedContentToSample(showToastMessage = true) {
 // AI Image Generation Logic
 // ==========================================
 let currentRefImageData = null;
+let referenceImageUploadPending = false;
 let currentGeneratedImageData = null;
 let genTimerInterval = null;
 let genTimerSeconds = 0;
@@ -2943,7 +2944,7 @@ function setGenProvider(provider, notify = true) {
         btnOpenAI.className = 'px-3 py-1.5 rounded-lg font-medium transition flex items-center gap-1.5 bg-indigo-600 text-white shadow';
     }
     if (badge) {
-        const imgModel = providerConfigCache?.openai?.model || 'Custom Router';
+        const imgModel = providerConfigCache?.openai?.image_model || providerConfigCache?.image_model || 'cx/gpt-5.6-sol-image';
         badge.innerText = `Custom OpenAI (${imgModel})`;
         badge.className = 'text-[11px] font-mono px-2 py-0.5 rounded bg-indigo-500/10 text-indigo-300 border border-indigo-500/30';
     }
@@ -3110,27 +3111,35 @@ function handleRefFileSelect(event) {
     }
 }
 
-function processRefImageFile(file) {
-    if (!file || !file.type.startsWith('image/')) {
-        showGenError('Vui lòng chọn tệp hình ảnh hợp lệ (PNG, JPG, WEBP).');
-        return;
-    }
-    if (file.size > 15 * 1024 * 1024) {
-        showGenError('Kích thước ảnh quá lớn (tối đa 15MB).');
-        return;
-    }
-
+async function processRefImageFile(file) {
+    if (!file.type.startsWith('image/')) { showGenError('Vui lòng chọn file ảnh hợp lệ.'); return; }
+    if (file.size > 15 * 1024 * 1024) { showGenError('Ảnh tham chiếu không được vượt quá 15MB.'); return; }
+    referenceImageUploadPending = true;
+    currentRefImageData = null;
     const reader = new FileReader();
-    reader.onload = (e) => {
-        currentRefImageData = e.target.result;
-        document.getElementById('genRefPreviewImg').src = currentRefImageData;
-        document.getElementById('genRefFileName').innerText = file.name;
-        document.getElementById('genRefFileSize').innerText = formatFileSize(file.size);
-        document.getElementById('genRefPreviewBox').classList.remove('hidden');
+    reader.onload = async function (e) {
+        const localPreview = e.target.result;
+        document.getElementById('genRefImagePreviewImg').src = localPreview;
+        document.getElementById('genRefImagePreview').classList.remove('hidden');
         document.getElementById('genRefDropzone').classList.add('hidden');
-        document.getElementById('genErrorBanner').classList.add('hidden');
+        document.getElementById('genRefStatus').innerText = 'Đang tải lên S3...';
+        try {
+            const response = await fetch('/api/reference-images/upload', {
+                method: 'POST', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ image: localPreview })
+            });
+            const data = await response.json();
+            if (!response.ok || !data.url) throw new Error(data.detail || 'Không nhận được URL S3');
+            currentRefImageData = data.url;
+            document.getElementById('genRefImagePreviewImg').src = data.url;
+            document.getElementById('genRefStatus').innerText = 'Đã tải lên S3 - Link dùng trong 1 giờ';
+        } catch (error) {
+            currentRefImageData = null; removeRefImage();
+            showGenError('Upload ảnh tham chiếu thất bại: ' + error.message);
+        } finally { referenceImageUploadPending = false; }
     };
-    reader.onerror = () => {
+    reader.onerror = function () {
+        referenceImageUploadPending = false; currentRefImageData = null;
         showGenError('Không thể đọc file ảnh.');
     };
     reader.readAsDataURL(file);
@@ -3264,9 +3273,15 @@ async function submitGenerateImage() {
             })
         });
 
-        const data = await response.json();
+        const responseText = await response.text();
+        let data;
+        try {
+            data = JSON.parse(responseText);
+        } catch (_) {
+            throw new Error(responseText.trim() || ('Server trả về dữ liệu không hợp lệ (HTTP ' + response.status + ')'));
+        }
         if (!response.ok) {
-            throw new Error(data.detail || 'Không thể tạo ảnh từ mô hình AI');
+            throw new Error(data.detail || data.message || ('Lỗi server HTTP ' + response.status));
         }
 
         currentGeneratedImageData = data.image_url;
@@ -5103,6 +5118,14 @@ function openSettingsModal() {
         document.getElementById('cfgChatModel').value = cfg.chat_model || cfg.model || '';
         document.getElementById('cfgImageModel').value = cfg.image_model || '';
         document.getElementById('cfgImageRefSupport').checked = cfg.image_reference_support || false;
+        document.getElementById('cfgS3Enabled').checked = cfg.s3_enabled || false;
+        document.getElementById('cfgS3Endpoint').value = cfg.s3_endpoint_url || '';
+        document.getElementById('cfgS3Region').value = cfg.s3_region || 'auto';
+        document.getElementById('cfgS3Bucket').value = cfg.s3_bucket || '';
+        document.getElementById('cfgS3Prefix').value = cfg.s3_key_prefix || 'references';
+        document.getElementById('cfgS3AccessKey').value = cfg.s3_access_key_id || '';
+        document.getElementById('cfgS3SecretKey').value = '';
+        document.getElementById('cfgS3SecretKey').placeholder = cfg.has_s3_secret ? '••••••• (để trống = giữ nguyên)' : 'Secret access key';
         document.getElementById('cfgTimeout').value = cfg.timeout || 300;
         document.getElementById('cfgApiKey').value = '';
         document.getElementById('cfgApiKey').placeholder = cfg.has_api_key ? '••••••• (để trống = giữ nguyên)' : 'sk-...';
@@ -5122,6 +5145,13 @@ async function cfgSave() {
         chat_model: document.getElementById('cfgChatModel').value.trim(),
         image_model: document.getElementById('cfgImageModel').value.trim(),
         image_reference_support: document.getElementById('cfgImageRefSupport').checked,
+        s3_enabled: document.getElementById('cfgS3Enabled').checked,
+        s3_endpoint_url: document.getElementById('cfgS3Endpoint').value.trim(),
+        s3_region: document.getElementById('cfgS3Region').value.trim() || 'auto',
+        s3_bucket: document.getElementById('cfgS3Bucket').value.trim(),
+        s3_key_prefix: document.getElementById('cfgS3Prefix').value.trim() || 'references',
+        s3_access_key_id: document.getElementById('cfgS3AccessKey').value.trim(),
+        s3_secret_access_key: document.getElementById('cfgS3SecretKey').value.trim(),
         timeout: parseInt(document.getElementById('cfgTimeout').value) || 300,
         stream: true,
     };
