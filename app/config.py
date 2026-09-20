@@ -1,6 +1,5 @@
 import os
 import sys
-import json
 import socket
 from pathlib import Path
 
@@ -22,7 +21,7 @@ else:
 DB_PATH = DATA_DIR / "prompts.db"
 JSON_DATA_PATH = DATA_DIR / "cleaned_prompts.json"
 IMAGES_DIR = DATA_DIR / "images"
-CONFIG_PATH = DATA_DIR / "config.json"
+ENV_PATH = BASE_DIR / ".env"
 
 # Server — always random port, localhost only
 HOST = "127.0.0.1"
@@ -39,7 +38,7 @@ def find_free_port() -> int:
 
 
 # ============================================================
-#  Config persistence — JSON file in data/config.json
+#  Config persistence — .env file at project root
 # ============================================================
 
 _DEFAULT_CONFIG = {
@@ -63,26 +62,69 @@ _DEFAULT_CONFIG = {
 }
 
 
-def _load_config_file() -> dict:
-    if CONFIG_PATH.exists():
+_ENV_KEY_MAP = {
+    "AI_PROVIDER": "provider",
+    "AI_BASE_URL": "base_url",
+    "AI_API_KEY": "api_key",
+    "AI_MODEL": "model",
+    "AI_CHAT_MODEL": "chat_model",
+    "AI_IMAGE_MODEL": "image_model",
+    "AI_IMAGE_REFERENCE_SUPPORT": "image_reference_support",
+    "AI_TIMEOUT": "timeout",
+    "AI_STREAM": "stream",
+    "S3_ENABLED": "s3_enabled",
+    "S3_ENDPOINT_URL": "s3_endpoint_url",
+    "S3_REGION": "s3_region",
+    "S3_BUCKET": "s3_bucket",
+    "S3_ACCESS_KEY_ID": "s3_access_key_id",
+    "S3_SECRET_ACCESS_KEY": "s3_secret_access_key",
+    "S3_KEY_PREFIX": "s3_key_prefix",
+    "SETUP_DONE": "setup_done",
+}
+
+_BOOL_KEYS = {"image_reference_support", "stream", "s3_enabled", "setup_done"}
+_INT_KEYS = {"timeout"}
+
+
+def _parse_bool(value: str) -> bool:
+    return value.strip().lower() in {"1", "true", "yes", "y", "on"}
+
+
+def _coerce_env_value(key: str, value: str):
+    if key in _BOOL_KEYS:
+        return _parse_bool(value)
+    if key in _INT_KEYS:
         try:
-            return json.loads(CONFIG_PATH.read_text("utf-8"))
-        except Exception:
-            pass
-    return {}
+            return int(value)
+        except ValueError:
+            return _DEFAULT_CONFIG[key]
+    return value.strip()
 
 
-def _save_config_file(cfg: dict):
-    DATA_DIR.mkdir(parents=True, exist_ok=True)
-    CONFIG_PATH.write_text(json.dumps(cfg, indent=2, ensure_ascii=False), encoding="utf-8")
+def _read_env_file() -> dict:
+    if not ENV_PATH.exists():
+        return {}
+
+    values = {}
+    for raw_line in ENV_PATH.read_text("utf-8").splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        env_key, value = line.split("=", 1)
+        env_key = env_key.strip()
+        config_key = _ENV_KEY_MAP.get(env_key)
+        if not config_key:
+            continue
+        value = value.strip().strip('"').strip("'")
+        values[config_key] = _coerce_env_value(config_key, value)
+    return values
 
 
 def get_ai_config() -> dict:
-    """Load AI config from config.json, merged with defaults."""
-    saved = _load_config_file()
+    """Load AI config from .env, merged with defaults."""
+    saved = _read_env_file()
     merged = {**_DEFAULT_CONFIG, **saved}
 
-    # Strip whitespace from string values
     for k in ("provider", "base_url", "api_key", "model", "chat_model", "image_model",
               "s3_endpoint_url", "s3_region", "s3_bucket", "s3_access_key_id",
               "s3_secret_access_key", "s3_key_prefix"):
@@ -94,7 +136,6 @@ def get_ai_config() -> dict:
     if merged.get("s3_endpoint_url"):
         merged["s3_endpoint_url"] = merged["s3_endpoint_url"].rstrip("/")
 
-    # Fallbacks: chat_model -> model, image_model -> chat_model -> model
     if not merged.get("chat_model"):
         merged["chat_model"] = merged.get("model", "gpt-4o-mini")
     if not merged.get("image_model"):
@@ -104,22 +145,12 @@ def get_ai_config() -> dict:
 
 
 def save_ai_config(cfg: dict):
-    """Save AI config to config.json. Only persists known keys.
-    Empty string for api_key means keep existing value."""
-    current = _load_config_file()
-    for k in _DEFAULT_CONFIG:
-        if k in cfg:
-            # Don't overwrite existing keys with empty string
-            if k in ("api_key", "s3_secret_access_key") and not cfg[k]:
-                continue
-            current[k] = cfg[k]
-    current["setup_done"] = True
-    _save_config_file(current)
+    raise RuntimeError("Cấu hình chỉ được đọc từ file .env. Không thể sửa trên web.")
 
 
 def is_setup_done() -> bool:
-    cfg = _load_config_file()
-    return cfg.get("setup_done", False)
+    cfg = get_ai_config()
+    return bool(cfg.get("setup_done") or cfg.get("api_key"))
 
 
 # Ensure required directories exist

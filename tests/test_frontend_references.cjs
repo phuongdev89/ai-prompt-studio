@@ -16,9 +16,9 @@ const context = vm.createContext({
     },
     fetch: async (url) => {
         requests.push(url);
-        return { ok: true, json: async () => url === '/api/config'
-            ? { ok: true }
-            : { active_provider: 'openai', openai: { model: 'updated-image-model' } } };
+        return { ok: true, json: async () => url === '/api/config/providers'
+            ? { active_provider: 'openai', openai: { image_model: 'updated-image-model' } }
+            : { ok: true } };
     },
 });
 vm.runInContext(fs.readFileSync(path.join(root, 'app/static/js/app.js'), 'utf8'), context);
@@ -35,8 +35,9 @@ for (const [, handler] of html.matchAll(/\bon\w+="([^"]*)"/g)) {
 }
 context.showToast = () => {};
 (async () => {
-    await context.cfgSave();
-    assert.deepEqual(requests, ['/api/config', '/api/config/providers']);
+    // Web no longer saves config; provider refresh still runs on modal open.
+    await context.fetchProviderConfig();
+    assert.deepEqual(requests, ['/api/config/providers']);
     assert.match(elements.get('genProviderInfoBadge').innerText, /updated-image-model/);
     console.log(`PASS: ${checked} HTML handler calls and settings provider refresh`);
 })().catch(error => { console.error(error); process.exitCode = 1; });

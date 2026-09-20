@@ -2935,6 +2935,30 @@ async function fetchProviderConfig() {
     }
 }
 
+function isImageReferenceSupported() {
+    return !!(providerConfigCache?.openai?.image_reference_support || providerConfigCache?.image_reference_support);
+}
+
+function updateGenerateImageReferenceLayout() {
+    const enabled = isImageReferenceSupported();
+    const grid = document.getElementById('genPromptRefGrid');
+    const section = document.getElementById('genReferenceUploadSection');
+    const prompt = document.getElementById('genPromptText');
+
+    if (grid) {
+        grid.className = enabled
+            ? 'grid grid-cols-1 lg:grid-cols-2 gap-4 items-start'
+            : 'grid grid-cols-1 gap-4 items-start';
+    }
+    if (section) section.classList.toggle('hidden', !enabled);
+    if (prompt) {
+        prompt.rows = enabled ? 10 : 8;
+        prompt.classList.toggle('min-h-[260px]', enabled);
+        prompt.classList.toggle('min-h-[220px]', !enabled);
+    }
+    if (!enabled) clearGenRefImage();
+}
+
 function setGenProvider(provider, notify = true) {
     currentGenProvider = 'openai';
     const btnOpenAI = document.getElementById('btnProviderOpenAI');
@@ -3003,6 +3027,7 @@ async function openGenerateImageModal(promptId = null) {
 
     // Refresh provider configuration status
     await fetchProviderConfig();
+    updateGenerateImageReferenceLayout();
 
     // Populate current prompt text
     const promptInput = document.getElementById('genPromptText');
@@ -3048,7 +3073,7 @@ async function openGenerateImageModal(promptId = null) {
     }
 
     // Reset reference image
-    removeRefImage();
+    clearGenRefImage();
 
     // Populate existing images thumbnails if any
     const existingBox = document.getElementById('genExistingImagesBox');
@@ -3121,8 +3146,6 @@ async function processRefImageFile(file) {
         const localPreview = e.target.result;
         document.getElementById('genRefImagePreviewImg').src = localPreview;
         document.getElementById('genRefImagePreview').classList.remove('hidden');
-        document.getElementById('genRefDropzone').classList.add('hidden');
-        document.getElementById('genRefStatus').innerText = 'Đang tải lên S3...';
         try {
             const response = await fetch('/api/reference-images/upload', {
                 method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -3132,9 +3155,9 @@ async function processRefImageFile(file) {
             if (!response.ok || !data.url) throw new Error(data.detail || 'Không nhận được URL S3');
             currentRefImageData = data.url;
             document.getElementById('genRefImagePreviewImg').src = data.url;
-            document.getElementById('genRefStatus').innerText = 'Đã tải lên S3 - Link dùng trong 1 giờ';
+            showToast('Đã tải ảnh tham chiếu lên S3 (link dùng trong 1 giờ)');
         } catch (error) {
-            currentRefImageData = null; removeRefImage();
+            currentRefImageData = null; clearGenRefImage();
             showGenError('Upload ảnh tham chiếu thất bại: ' + error.message);
         } finally { referenceImageUploadPending = false; }
     };
@@ -3169,28 +3192,7 @@ function selectExistingImageAsRef(src) {
 function handleGenRefImageUpload(event) {
     const file = event.target.files && event.target.files[0];
     if (!file) return;
-
-    if (!file.type.startsWith('image/')) {
-        showGenError('Vui lòng chọn tệp hình ảnh hợp lệ (PNG, JPG, WEBP).');
-        return;
-    }
-    if (file.size > 15 * 1024 * 1024) {
-        showGenError('Kích thước ảnh quá lớn (tối đa 15MB).');
-        return;
-    }
-
-    const reader = new FileReader();
-    reader.onload = (e) => {
-        currentRefImageData = e.target.result;
-        document.getElementById('genRefImagePreviewImg').src = currentRefImageData;
-        document.getElementById('genRefImageLabel').innerText = file.name;
-        document.getElementById('genRefImagePreview').classList.remove('hidden');
-        document.getElementById('genErrorBanner').classList.add('hidden');
-    };
-    reader.onerror = () => {
-        showGenError('Không thể đọc file ảnh.');
-    };
-    reader.readAsDataURL(file);
+    processRefImageFile(file);
 }
 
 function clearGenRefImage() {
@@ -3234,6 +3236,11 @@ async function submitGenerateImage() {
     const genSize = document.getElementById('genSizeSelect')?.value || '1024x1024';
     const genQuality = document.getElementById('genQualitySelect')?.value || 'hd';
     const genDetail = document.getElementById('genDetailSelect')?.value || 'high';
+
+    if (referenceImageUploadPending) {
+        showGenError('Ảnh tham chiếu đang tải lên S3, vui lòng đợi hoàn tất rồi tạo ảnh.');
+        return;
+    }
 
     // UI state: loading
     document.getElementById('genErrorBanner').classList.add('hidden');

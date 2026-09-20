@@ -803,6 +803,9 @@ def get_providers_config():
             "has_key": bool(cfg.get("api_key")),
             "base_url": cfg.get("base_url"),
             "model": cfg.get("chat_model") or cfg.get("model"),
+            "chat_model": cfg.get("chat_model") or cfg.get("model"),
+            "image_model": cfg.get("image_model"),
+            "image_reference_support": cfg.get("image_reference_support", False),
         }
     }
 
@@ -834,11 +837,8 @@ def get_config():
 
 @router.post("/config")
 async def save_config(request: Request):
-    """Lưu cấu hình AI vào config.json."""
-    from app.config import save_ai_config
-    body = await request.json()
-    save_ai_config(body)
-    return {"ok": True}
+    """Config is read-only on the web; edit .env instead."""
+    raise HTTPException(status_code=403, detail="Cấu hình chỉ được đọc từ file .env. Không thể sửa trên web.")
 
 @router.get("/tags")
 @router.get("/tags/")
