@@ -5,7 +5,7 @@ let formState = {};
 let currentSlideIndex = 0;
 let currentTag = 'all';
 let currentTab = 'featured';
-let currentNavTab = 'image'; // 'image' | 'content'
+let currentNavTab = 'image'; // 'image' | 'video' | 'content'
 let currentSampleContentIndex = 0;
 let usePromptProvider = 'openai';
 let searchDebounceTimer = null;
@@ -25,20 +25,20 @@ function parseCurrentRoute() {
     let tab = null;
     let promptId = null;
 
-    // 1. Check pathname: /image, /content, /character, /image/:id, etc.
-    if (parts.length > 0 && (parts[0] === 'image' || parts[0] === 'character' || parts[0] === 'content')) {
+    // 1. Check pathname: /image, /video, /content, /character, /image/:id, etc.
+    if (parts.length > 0 && (parts[0] === 'image' || parts[0] === 'video' || parts[0] === 'character' || parts[0] === 'content')) {
         tab = parts[0] === 'character' ? 'image' : parts[0];
         if (parts.length > 1 && parts[1]) {
             promptId = decodeURIComponent(parts[1]);
         }
     }
 
-    // 2. Check fallback hash (if user had old hash URL e.g. #content_100, #/content/100, #character/prompt_1)
+    // 2. Check fallback hash (if user had old hash URL e.g. #content_100, #/content/100, #video/prompt_35)
     if (!tab && window.location.hash) {
         const rawHash = window.location.hash.replace(/^#\/?/, '').trim();
         const hashParts = rawHash.split('/').filter(Boolean);
         if (hashParts.length > 0) {
-            if (hashParts[0] === 'image' || hashParts[0] === 'character' || hashParts[0] === 'content') {
+            if (hashParts[0] === 'image' || hashParts[0] === 'video' || hashParts[0] === 'character' || hashParts[0] === 'content') {
                 tab = hashParts[0] === 'character' ? 'image' : hashParts[0];
                 if (hashParts[1]) promptId = decodeURIComponent(hashParts[1]);
             } else if (rawHash.startsWith('content_')) {
@@ -55,9 +55,9 @@ function parseCurrentRoute() {
     if (!tab) {
         let savedTab = localStorage.getItem('last_active_tab');
         if (savedTab === 'character') savedTab = 'image';
-        if (savedTab === 'image' || savedTab === 'content') {
+        if (savedTab === 'image' || savedTab === 'video' || savedTab === 'content') {
             tab = savedTab;
-            promptId = localStorage.getItem('last_active_prompt_' + tab) || localStorage.getItem('last_active_prompt_character') || null;
+            promptId = localStorage.getItem('last_active_prompt_' + tab) || null;
         }
     }
 
@@ -95,10 +95,372 @@ function updateBrowserRoute(tab, promptId = null, replace = true) {
     } catch (e) {}
 }
 
+// ==========================================
+// AI Connection & Ping State Management
+// ==========================================
+async function pingAiConnection(manual = false) {
+    const dot = document.getElementById('aiStatusDot');
+    const text = document.getElementById('aiStatusText');
+    const btn = document.getElementById('aiConnectionStatusBtn');
+    const icon = document.getElementById('aiStatusIcon');
+
+    if (dot) dot.className = 'w-2 h-2 rounded-full bg-amber-400 animate-ping';
+    if (text) text.innerText = 'AI: Đang kiểm tra...';
+    if (btn) {
+        btn.className = 'inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium bg-dark-700/80 hover:bg-dark-700 text-slate-300 border border-dark-600 transition shadow-sm active:scale-95 cursor-pointer';
+        btn.title = 'Đang kiểm tra kết nối AI...';
+    }
+
+    try {
+        const res = await fetch('/api/ai/ping');
+        const data = await res.json();
+
+        if (res.ok && data.status === 'connected') {
+            if (dot) dot.className = 'w-2 h-2 rounded-full bg-emerald-400 animate-pulse';
+            if (text) {
+                text.innerHTML = `<span class="text-emerald-300 font-semibold font-mono">${escapeHtml(data.model)}</span> <span class="text-slate-400">• Sẵn sàng</span> <span class="text-slate-500 font-mono text-[10px]">(${data.latency_ms}ms)</span>`;
+            }
+            if (btn) {
+                btn.className = 'inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 transition shadow-sm active:scale-95 cursor-pointer';
+                btn.title = `Mô hình AI: ${data.model} | Ảnh: ${data.image_model} | Độ trễ: ${data.latency_ms}ms\nURL: ${data.base_url}\n(Nhấp để kiểm tra lại)`;
+            }
+            if (manual) {
+                showToast(`Kết nối AI ổn định (${data.latency_ms}ms - ${data.model})`);
+            }
+        } else {
+            const errMsg = data.message || 'Mất kết nối tới AI';
+            if (dot) dot.className = 'w-2 h-2 rounded-full bg-rose-500';
+            if (text) text.innerText = 'AI: Mất kết nối';
+            if (btn) {
+                btn.className = 'inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium bg-rose-500/10 hover:bg-rose-500/20 text-rose-300 border border-rose-500/30 transition shadow-sm active:scale-95 cursor-pointer';
+                btn.title = `${errMsg}\n(Nhấp để thử lại)`;
+            }
+            if (manual) {
+                showToast(`Lỗi kết nối AI: ${errMsg}`);
+            }
+        }
+    } catch (err) {
+        if (dot) dot.className = 'w-2 h-2 rounded-full bg-rose-500';
+        if (text) text.innerText = 'AI: Lỗi mạng';
+        if (btn) {
+            btn.className = 'inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium bg-rose-500/10 hover:bg-rose-500/20 text-rose-300 border border-rose-500/30 transition shadow-sm active:scale-95 cursor-pointer';
+            btn.title = `Lỗi mạng khi ping AI: ${err.message}\n(Nhấp để thử lại)`;
+        }
+        if (manual) {
+            showToast(`Không thể kết nối server để kiểm tra AI: ${err.message}`);
+        }
+    }
+}
+
+// ==========================================
+// AI Background Task Definitions & Queue System
+// ==========================================
+const AI_TASK_DEFINITIONS = {
+    suggest_primary: {
+        id: 'suggest_primary',
+        label: 'Gợi ý thuộc tính',
+        cardRunningLabel: 'Đang gợi ý thuộc tính...',
+        cardQueuedLabel: 'Chờ gợi ý thuộc tính...',
+        buttonId: 'btnSuggestPrimary',
+        defaultTitle: 'Dùng AI phân tích ngữ cảnh câu lệnh để tự động chọn & đánh dấu các thuộc tính quan trọng cần nhập hoặc lựa chọn',
+        idleHtml: '<i class="fa-solid fa-wand-magic-sparkles text-amber-400 text-[11px]"></i> <span>AI Gợi ý thuộc tính</span>',
+        runningHtml: '<i class="fa-solid fa-spinner fa-spin text-amber-400 text-[11px]"></i> <span>Đang gợi ý ngầm...</span>',
+        queuedHtml: '<i class="fa-solid fa-clock text-amber-400 text-[11px]"></i> <span>Đang trong hàng đợi...</span>'
+    },
+    convert_json: {
+        id: 'convert_json',
+        label: 'Chuyển sang JSON',
+        cardRunningLabel: 'Đang chuyển JSON...',
+        cardQueuedLabel: 'Chờ chuyển JSON...',
+        buttonId: 'convertJsonBtn',
+        defaultTitle: 'Chuyển đổi câu lệnh dạng text sang cấu trúc JSON phân cấp',
+        idleHtml: '<i class="fa-solid fa-code text-indigo-200"></i> <span>Chuyển sang JSON</span>',
+        runningHtml: '<i class="fa-solid fa-spinner fa-spin text-indigo-300"></i> <span>Đang chuyển JSON ngầm...</span>',
+        queuedHtml: '<i class="fa-solid fa-clock text-indigo-300"></i> <span>Đang trong hàng đợi...</span>'
+    },
+    improve_prompt: {
+        id: 'improve_prompt',
+        label: 'Cải tiến prompt',
+        cardRunningLabel: 'Đang cải tiến...',
+        cardQueuedLabel: 'Chờ cải tiến...',
+        buttonId: 'improvePromptBtn',
+        defaultTitle: 'Cải tiến câu lệnh bằng AI',
+        idleHtml: '<i class="fa-solid fa-wand-magic-sparkles text-amber-300"></i> <span>Cải tiến prompt</span>',
+        runningHtml: '<i class="fa-solid fa-spinner fa-spin text-emerald-300"></i> <span>Đang cải tiến ngầm...</span>',
+        queuedHtml: '<i class="fa-solid fa-clock text-emerald-300"></i> <span>Đang trong hàng đợi...</span>'
+    },
+    suggest_title: {
+        id: 'suggest_title',
+        label: 'AI Đặt tên',
+        cardRunningLabel: 'Đang đặt tên...',
+        cardQueuedLabel: 'Chờ đặt tên...',
+        buttonId: 'btnGenerateTitleAI',
+        defaultTitle: 'Nhấp để AI tự động đặt lại tiêu đề ngắn gọn, bắt mắt theo nội dung prompt',
+        idleHtml: '<i class="fa-solid fa-wand-magic-sparkles text-[11px] text-amber-300 group-hover/btn:rotate-12 transition-transform"></i> <span>AI Đặt tên</span>',
+        runningHtml: '<i class="fa-solid fa-circle-notch fa-spin text-[11px] text-amber-300"></i> <span>Đang đặt tên...</span>',
+        queuedHtml: '<i class="fa-solid fa-clock text-[11px] text-amber-300"></i> <span>Chờ đặt tên...</span>'
+    },
+    extract_json_image: {
+        id: 'extract_json_image',
+        label: 'Trích xuất JSON ảnh',
+        cardRunningLabel: 'Đang đọc JSON ảnh...',
+        cardQueuedLabel: 'Chờ đọc JSON ảnh...',
+        buttonId: 'btnExtractJsonFromImg',
+        defaultTitle: 'Gọi AI phân tích ảnh này để lấy JSON gốc và tạo prompt mới',
+        idleHtml: '<i class="fa-solid fa-code text-[11px] text-indigo-200"></i> <span>Lấy json từ ảnh này</span>',
+        runningHtml: '<i class="fa-solid fa-circle-notch fa-spin text-indigo-200"></i> <span>Đang phân tích...</span>',
+        queuedHtml: '<i class="fa-solid fa-clock text-indigo-200"></i> <span>Chờ phân tích...</span>'
+    },
+    compact_prompt: {
+        id: 'compact_prompt',
+        label: 'Tối giản Prompt',
+        cardRunningLabel: 'Đang tối giản...',
+        cardQueuedLabel: 'Chờ tối giản...',
+        buttonId: 'btnRegenCompact',
+        defaultTitle: 'Tạo lại phiên bản prompt tối giản (≤ 1000 ký tự) bằng AI',
+        idleHtml: '<i class="fa-solid fa-arrows-rotate text-[11px] text-amber-300"></i> <span>Tạo lại</span>',
+        runningHtml: '<i class="fa-solid fa-spinner fa-spin text-[11px] text-amber-300"></i> <span>Đang tạo...</span>',
+        queuedHtml: '<i class="fa-solid fa-clock text-[11px] text-amber-300"></i> <span>Chờ tạo...</span>'
+    }
+};
+
+const MAX_CONCURRENT_AI_TASKS = 1;
+const aiTaskQueue = [];
+let isProcessingAiQueue = false;
+
+// Synchronize all buttons in the detail pane strictly according to the specified prompt's state
+function syncDetailPaneButtonStates(promptId) {
+    for (const [taskType, def] of Object.entries(AI_TASK_DEFINITIONS)) {
+        const btn = document.getElementById(def.buttonId);
+        if (!btn) continue;
+
+        if (!promptId) {
+            btn.disabled = false;
+            btn.innerHTML = def.idleHtml;
+            if (def.defaultTitle) btn.title = def.defaultTitle;
+            continue;
+        }
+
+        const task = aiTaskQueue.find(t => t.promptId === promptId && t.taskType === taskType);
+        if (task) {
+            btn.disabled = true;
+            if (task.status === 'running') {
+                btn.innerHTML = def.runningHtml;
+                btn.title = `${def.label}: Đang xử lý trong nền...`;
+            } else if (task.status === 'queued') {
+                btn.innerHTML = def.queuedHtml;
+                btn.title = `${def.label}: Đang chờ trong hàng đợi...`;
+            }
+        } else {
+            btn.disabled = false;
+            btn.innerHTML = def.idleHtml;
+            if (def.defaultTitle) btn.title = def.defaultTitle;
+        }
+    }
+}
+
+function updateSidebarCardIndicator(promptId) {
+    const card = document.getElementById(`prompt-card-${promptId}`);
+    if (!card) return;
+
+    let indicator = card.querySelector('.prompt-card-bg-indicator');
+    const runningTask = aiTaskQueue.find(t => t.promptId === promptId && t.status === 'running');
+    const queuedTask = aiTaskQueue.find(t => t.promptId === promptId && t.status === 'queued');
+
+    if (runningTask) {
+        if (!indicator) {
+            indicator = document.createElement('div');
+            card.appendChild(indicator);
+        }
+        indicator.className = 'prompt-card-bg-indicator flex items-center gap-1.5 text-[10px] text-amber-400 font-medium animate-pulse mt-1.5 px-2 py-0.5 rounded bg-amber-500/10 border border-amber-500/20 w-fit';
+        const def = AI_TASK_DEFINITIONS[runningTask.taskType];
+        const label = def ? def.cardRunningLabel : 'Đang xử lý ngầm...';
+        indicator.innerHTML = `<i class="fa-solid fa-spinner fa-spin text-[10px]"></i> <span>${label}</span>`;
+    } else if (queuedTask) {
+        if (!indicator) {
+            indicator = document.createElement('div');
+            card.appendChild(indicator);
+        }
+        indicator.className = 'prompt-card-bg-indicator flex items-center gap-1.5 text-[10px] text-cyan-400 font-medium mt-1.5 px-2 py-0.5 rounded bg-cyan-500/10 border border-cyan-500/20 w-fit';
+        const def = AI_TASK_DEFINITIONS[queuedTask.taskType];
+        const label = def ? def.cardQueuedLabel : 'Đang trong hàng đợi...';
+        indicator.innerHTML = `<i class="fa-solid fa-clock text-[10px]"></i> <span>${label}</span>`;
+    } else {
+        if (indicator) {
+            indicator.remove();
+        }
+    }
+}
+
+function updateTaskUI(promptId) {
+    if (currentPromptId === promptId) {
+        syncDetailPaneButtonStates(promptId);
+    }
+    updateSidebarCardIndicator(promptId);
+}
+
+function getPromptCardIndicatorHtml(promptId) {
+    const runningTask = aiTaskQueue.find(t => t.promptId === promptId && t.status === 'running');
+    if (runningTask) {
+        const def = AI_TASK_DEFINITIONS[runningTask.taskType];
+        const label = def ? def.cardRunningLabel : 'Đang xử lý ngầm...';
+        return `<div class="prompt-card-bg-indicator flex items-center gap-1.5 text-[10px] text-amber-400 font-medium animate-pulse mt-1.5 px-2 py-0.5 rounded bg-amber-500/10 border border-amber-500/20 w-fit"><i class="fa-solid fa-spinner fa-spin text-[10px]"></i> <span>${label}</span></div>`;
+    }
+    const queuedTask = aiTaskQueue.find(t => t.promptId === promptId && t.status === 'queued');
+    if (queuedTask) {
+        const def = AI_TASK_DEFINITIONS[queuedTask.taskType];
+        const label = def ? def.cardQueuedLabel : 'Đang trong hàng đợi...';
+        return `<div class="prompt-card-bg-indicator flex items-center gap-1.5 text-[10px] text-cyan-400 font-medium mt-1.5 px-2 py-0.5 rounded bg-cyan-500/10 border border-cyan-500/20 w-fit"><i class="fa-solid fa-clock text-[10px]"></i> <span>${label}</span></div>`;
+    }
+    return '';
+}
+
+function updateGlobalBackgroundBadge() {
+    const badge = document.getElementById('globalBgTaskBadge');
+    const text = document.getElementById('globalBgTaskText');
+    if (!badge || !text) return;
+
+    const runningTasks = aiTaskQueue.filter(t => t.status === 'running');
+    const queuedTasks = aiTaskQueue.filter(t => t.status === 'queued');
+    const total = runningTasks.length + queuedTasks.length;
+
+    if (total > 0) {
+        if (runningTasks.length > 0 && queuedTasks.length > 0) {
+            text.innerText = `${runningTasks.length} đang chạy (${queuedTasks.length} chờ)`;
+        } else if (runningTasks.length > 0) {
+            text.innerText = `${runningTasks.length} tác vụ ngầm`;
+        } else {
+            text.innerText = `${queuedTasks.length} trong hàng đợi`;
+        }
+
+        const tooltipList = [
+            ...runningTasks.map(t => `[Đang chạy] ${t.promptTitle}: ${AI_TASK_DEFINITIONS[t.taskType]?.label || t.taskType}`),
+            ...queuedTasks.map((t, idx) => `[Chờ #${idx + 1}] ${t.promptTitle}: ${AI_TASK_DEFINITIONS[t.taskType]?.label || t.taskType}`)
+        ].join('\n');
+        badge.title = tooltipList;
+
+        badge.classList.remove('hidden');
+        badge.classList.add('inline-flex');
+    } else {
+        badge.removeAttribute('title');
+        badge.classList.add('hidden');
+        badge.classList.remove('inline-flex');
+    }
+}
+
+function hasActiveOrQueuedTask(promptId, taskType = null) {
+    if (!taskType) {
+        return aiTaskQueue.some(t => t.promptId === promptId);
+    }
+    return aiTaskQueue.some(t => t.promptId === promptId && t.taskType === taskType);
+}
+
+// Legacy alias
+function hasBackgroundTask(promptId, taskType = null) {
+    return hasActiveOrQueuedTask(promptId, taskType);
+}
+
+function enqueueAiTask(promptId, taskType, promptTitle, executeFn) {
+    const existing = aiTaskQueue.find(t => t.promptId === promptId && t.taskType === taskType);
+    if (existing) {
+        showToast(`Tác vụ "${existing.promptTitle}" đã có trong hàng đợi hoặc đang chạy.`);
+        return;
+    }
+
+    const runningCount = aiTaskQueue.filter(t => t.status === 'running').length;
+
+    const task = {
+        id: `${promptId}_${taskType}_${Date.now()}`,
+        promptId,
+        taskType,
+        promptTitle,
+        fn: executeFn,
+        status: 'queued',
+        createdAt: Date.now()
+    };
+
+    aiTaskQueue.push(task);
+    updateTaskUI(promptId);
+    updateGlobalBackgroundBadge();
+
+    const queuedCount = aiTaskQueue.filter(t => t.status === 'queued').length;
+    const taskLabel = AI_TASK_DEFINITIONS[taskType]?.label || 'Tác vụ AI';
+
+    if (runningCount === 0) {
+        showToast(`Đang thực hiện ${taskLabel} cho "${promptTitle}"... Bạn có thể tiếp tục thao tác item khác.`);
+    } else {
+        showToast(`Đã xếp ${taskLabel} cho "${promptTitle}" vào hàng đợi (vị trí #${queuedCount})... Bạn có thể tiếp tục thao tác item khác.`);
+    }
+
+    processAiTaskQueue();
+}
+
+async function processAiTaskQueue() {
+    if (isProcessingAiQueue) return;
+
+    const runningCount = aiTaskQueue.filter(t => t.status === 'running').length;
+    if (runningCount >= MAX_CONCURRENT_AI_TASKS) return;
+
+    const nextTask = aiTaskQueue.find(t => t.status === 'queued');
+    if (!nextTask) return;
+
+    nextTask.status = 'running';
+    updateTaskUI(nextTask.promptId);
+    updateGlobalBackgroundBadge();
+
+    isProcessingAiQueue = true;
+    try {
+        await nextTask.fn();
+    } catch (err) {
+        console.error(`AI Task Error [${nextTask.taskType}] for ${nextTask.promptId}:`, err);
+        showToast(`Lỗi tác vụ "${nextTask.promptTitle}": ${err.message || err}`);
+    } finally {
+        const idx = aiTaskQueue.findIndex(t => t.id === nextTask.id);
+        if (idx !== -1) {
+            aiTaskQueue.splice(idx, 1);
+        }
+        updateTaskUI(nextTask.promptId);
+        updateGlobalBackgroundBadge();
+        isProcessingAiQueue = false;
+        setTimeout(processAiTaskQueue, 50);
+    }
+}
+
+// Backward compatibility helpers
+function registerBackgroundTask(promptId, taskType, promptTitle) {
+    if (!hasActiveOrQueuedTask(promptId, taskType)) {
+        aiTaskQueue.push({
+            id: `${promptId}_${taskType}_${Date.now()}`,
+            promptId,
+            taskType,
+            promptTitle,
+            fn: () => Promise.resolve(),
+            status: 'running',
+            createdAt: Date.now()
+        });
+        updateTaskUI(promptId);
+        updateGlobalBackgroundBadge();
+    }
+}
+
+function unregisterBackgroundTask(promptId, taskType) {
+    const idx = aiTaskQueue.findIndex(t => t.promptId === promptId && t.taskType === taskType);
+    if (idx !== -1) {
+        aiTaskQueue.splice(idx, 1);
+        updateTaskUI(promptId);
+        updateGlobalBackgroundBadge();
+    }
+}
+
+function updateBackgroundTaskUI(promptId, taskType, isRunning) {
+    updateTaskUI(promptId);
+}
+
 // Initialize app on DOM ready with browser router
 document.addEventListener('DOMContentLoaded', () => {
     initEventListeners();
     fetchStats();
+    pingAiConnection(false); // Ping AI on startup
 
     // Parse current route from browser URL (Clean path, NO '#')
     const route = parseCurrentRoute();
@@ -480,7 +842,21 @@ function renderPromptList(items) {
         const isJson = item.prompt_type === 'json' || item.parsed_json;
         const imgCount = item.image_count || (item.images ? item.images.length : 0);
         const sampleCount = item.sample_count || 0;
-        const note = item.note || '';
+        const bgIndicator = getPromptCardIndicatorHtml(item.id);
+
+        const rawContent = item.original_raw_content || item.raw_content || item.prompt_code || '';
+        const rawChars = rawContent.length;
+
+        const isDifferentCategory = item.category && item.category !== currentNavTab;
+        const categoryBadgeHtml = isDifferentCategory ? `
+            <span class="text-[9px] px-1.5 py-0.5 rounded font-bold font-mono ${
+                item.category === 'video' ? 'bg-rose-500/20 text-rose-300 border border-rose-500/30' :
+                item.category === 'content' ? 'bg-cyan-500/20 text-cyan-300 border border-cyan-500/30' :
+                'bg-purple-500/20 text-purple-300 border border-purple-500/30'
+            }" title="Câu lệnh này đã được chuyển sang danh mục: ${item.category}">
+                ${item.category === 'video' ? '🎬 Video' : (item.category === 'content' ? '📝 Bài viết' : '📸 Ảnh')}
+            </span>
+        ` : '';
 
         return `
             <div onclick="selectPrompt('${item.id}')" id="prompt-card-${item.id}"
@@ -490,19 +866,17 @@ function renderPromptList(items) {
                         #${idx + 1}
                     </span>
                     <div class="flex items-center gap-1.5 flex-wrap justify-end">
-                        ${currentNavTab === 'content' ? `
-                            ${sampleCount > 0 ? `
-                                <span class="text-[10px] px-1.5 py-0.5 rounded bg-dark-900/90 text-cyan-400 border border-cyan-500/20 flex items-center gap-1 font-mono">
-                                    <i class="fa-solid fa-file-lines text-[9px]"></i> ${sampleCount} Mẫu
-                                </span>
-                            ` : ''}
-                        ` : `
-                            ${imgCount > 0 ? `
-                                <span class="text-[10px] px-1.5 py-0.5 rounded bg-dark-900/90 text-amber-400/90 border border-amber-500/20 flex items-center gap-1 font-mono">
-                                    <i class="fa-solid fa-image text-[9px]"></i> ${imgCount}
-                                </span>
-                            ` : ''}
-                        `}
+                        ${categoryBadgeHtml}
+                        ${imgCount > 0 ? `
+                            <span class="text-[10px] px-1.5 py-0.5 rounded bg-dark-900/90 text-amber-400/90 border border-amber-500/20 flex items-center gap-1 font-mono">
+                                <i class="fa-solid fa-image text-[9px]"></i> ${imgCount}
+                            </span>
+                        ` : ''}
+                        ${sampleCount > 0 ? `
+                            <span class="text-[10px] px-1.5 py-0.5 rounded bg-dark-900/90 text-cyan-400 border border-cyan-500/20 flex items-center gap-1 font-mono">
+                                <i class="fa-solid fa-file-lines text-[9px]"></i> ${sampleCount} Mẫu
+                            </span>
+                        ` : ''}
                         <span class="text-[10px] px-1.5 py-0.5 rounded font-medium ${isJson ? 'bg-indigo-500/10 text-indigo-400 border border-indigo-500/20' : 'bg-slate-700/50 text-slate-300'}">
                             ${isJson ? 'JSON' : 'TEXT'}
                         </span>
@@ -511,18 +885,25 @@ function renderPromptList(items) {
                 <h4 class="text-xs font-medium text-slate-200 group-hover:text-white line-clamp-2 leading-relaxed">
                     ${escapeHtml(item.title)}
                 </h4>
-                ${note ? `
+                ${bgIndicator}
+                ${item.note ? `
                     <p class="text-[11px] text-slate-400 mt-1 line-clamp-2 leading-tight flex items-start gap-1">
                         <i class="fa-solid fa-note-sticky text-amber-400/80 text-[10px] mt-0.5 flex-shrink-0"></i>
-                        <span>${escapeHtml(note)}</span>
+                        <span>${escapeHtml(item.note)}</span>
                     </p>
                 ` : ''}
-                ${item.tags && item.tags.length > 0 ? `
-                    <div class="sidebar-card-tags flex items-center gap-1 flex-wrap mt-1.5 pt-1 border-t border-dark-750/50">
-                        ${item.tags.slice(0, 3).map(t => `<span class="text-[9px] font-mono px-1.5 py-0.2 rounded bg-dark-900/80 text-brand-400 border border-brand-500/20">#${escapeHtml(t)}</span>`).join('')}
-                        ${item.tags.length > 3 ? `<span class="text-[9px] font-mono text-slate-500">+${item.tags.length - 3}</span>` : ''}
+                <div class="flex items-center justify-between gap-1.5 mt-2 pt-1 border-t border-dark-750/50 text-[10px]">
+                    <div class="sidebar-card-tags flex items-center gap-1 flex-wrap min-w-0">
+                        ${item.tags && item.tags.length > 0 ? `
+                            ${item.tags.slice(0, 2).map(t => `<span class="text-[9px] font-mono px-1.5 py-0.2 rounded bg-dark-900/80 text-brand-400 border border-brand-500/20 truncate max-w-[85px]">#${escapeHtml(t)}</span>`).join('')}
+                            ${item.tags.length > 2 ? `<span class="text-[9px] font-mono text-slate-500">+${item.tags.length - 2}</span>` : ''}
+                        ` : '<span class="text-[10px] text-slate-600/70">--</span>'}
                     </div>
-                ` : ''}
+                    <span class="text-[10px] font-mono text-slate-400 flex items-center gap-1 ml-auto shrink-0 group-hover:text-emerald-400 transition-colors" title="Độ dài văn bản gốc (Raw / Gốc): ${rawChars} ký tự">
+                        <i class="fa-solid fa-align-left text-[9px] text-slate-500"></i>
+                        <span>${rawChars.toLocaleString()} chars</span>
+                    </span>
+                </div>
             </div>
         `;
     }).join('');
@@ -572,9 +953,26 @@ function hideDetailLoading(minDuration = 120) {
     }, remaining);
 }
 
+function highlightActivePromptCard(promptId, scrollIntoView = false) {
+    if (!promptId) return;
+    document.querySelectorAll('.prompt-card').forEach(el => {
+        el.classList.remove('bg-dark-700', 'border-brand-500/50', 'ring-1', 'ring-brand-500/30', 'bg-gradient-to-r', 'from-brand-950/40', 'to-dark-700');
+    });
+    const activeEl = document.getElementById(`prompt-card-${promptId}`);
+    if (activeEl) {
+        activeEl.classList.add('bg-dark-700', 'border-brand-500/50', 'ring-1', 'ring-brand-500/30');
+        if (scrollIntoView) {
+            activeEl.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+        }
+    }
+}
+
 async function selectPrompt(promptId, updateRoute = true) {
     if (!promptId) return;
     currentPromptId = promptId;
+
+    // Immediately synchronize detail button states for the newly selected prompt
+    syncDetailPaneButtonStates(promptId);
 
     // Update browser URL (clean path, NO '#')
     if (updateRoute) {
@@ -582,14 +980,7 @@ async function selectPrompt(promptId, updateRoute = true) {
     }
 
     // Highlight active in sidebar and scroll card into view
-    document.querySelectorAll('.prompt-card').forEach(el => {
-        el.classList.remove('bg-dark-700', 'border-brand-500/50', 'ring-1', 'ring-brand-500/30', 'bg-gradient-to-r', 'from-brand-950/40', 'to-dark-700');
-    });
-    const activeEl = document.getElementById(`prompt-card-${promptId}`);
-    if (activeEl) {
-        activeEl.classList.add('bg-dark-700', 'border-brand-500/50', 'ring-1', 'ring-brand-500/30');
-        activeEl.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-    }
+    highlightActivePromptCard(promptId, true);
 
     // Close mobile sidebar if open
     const sidebar = document.getElementById('sidebar');
@@ -617,6 +1008,8 @@ async function selectPrompt(promptId, updateRoute = true) {
 
 function renderDetail(prompt) {
     if (!prompt) return;
+    currentPromptDetail = prompt;
+    if (prompt.id) currentPromptId = prompt.id;
 
     // Header info
     const isJson = prompt.prompt_type === 'json' || prompt.parsed_json;
@@ -632,8 +1025,18 @@ function renderDetail(prompt) {
     }
 
     const images = prompt.images || [];
-    const isContent = currentNavTab === 'content' || prompt.category === 'content';
     const samples = prompt.sample_contents || [];
+    const hasImages = (images && images.length > 0);
+    const hasSamples = (samples && samples.length > 0);
+
+    let isContent = false;
+    if (currentNavTab === 'content') {
+        isContent = true;
+    } else if (currentNavTab === 'video') {
+        isContent = !hasImages && hasSamples;
+    } else {
+        isContent = (prompt.category === 'content' && !hasImages);
+    }
 
     document.getElementById('currentPromptTitle').innerText = prompt.title || 'Không có tiêu đề';
 
@@ -682,8 +1085,11 @@ function renderDetail(prompt) {
     // Render Dynamic Form
     renderDynamicForm(prompt.fields || []);
 
-    // Render Code Display
-    updatePromptCodeDisplay();
+    // Render Code Display and Tab Sync (luôn mặc định là tab 'live' - Prompt tùy biến khi vào item mới)
+    setCodeViewMode('live');
+
+    // Sync background and queued task state on the buttons for this prompt
+    syncDetailPaneButtonStates(prompt.id);
 }
 
 function renderSlider(images) {
@@ -812,33 +1218,77 @@ function renderDynamicForm(fields) {
     if (allCountBadge) allCountBadge.innerText = (fields || []).length;
     if (featuredCountBadge) featuredCountBadge.innerText = primaryFields.length;
 
-    const isImagePrompt = currentPromptDetail && (currentPromptDetail.category === 'image' || currentPromptDetail.category === 'character');
+    const promptCat = (currentPromptDetail && currentPromptDetail.category) || 'image';
+    const isImagePrompt = (promptCat === 'image' || promptCat === 'character');
     const needsRef = currentPromptDetail && !!currentPromptDetail.requires_reference;
 
-    // 1. Reference toggle header for 'all' tab (only for image prompts)
-    const refToggleHtml = isImagePrompt ? `
-        <div class="p-3 rounded-xl bg-gradient-to-r from-purple-950/30 via-dark-900/80 to-dark-900/60 border border-purple-500/25 hover:border-purple-500/40 transition flex items-center justify-between gap-3 mb-2">
-            <div class="flex items-center gap-2.5 min-w-0">
-                <div class="w-8 h-8 rounded-lg bg-purple-500/15 text-purple-400 flex items-center justify-center flex-shrink-0 border border-purple-500/20">
-                    <i class="fa-solid fa-camera-retro text-xs"></i>
-                </div>
-                <div class="min-w-0">
-                    <div class="text-xs font-semibold text-slate-200 flex items-center gap-1.5">
-                        <span>Cần ảnh tham chiếu</span>
-                        <span class="text-[9px] font-mono px-1.5 py-0.5 rounded bg-purple-500/15 text-purple-300 border border-purple-500/25">Reference Image</span>
+    // 1. Configuration header for 'all' tab (Chuyển đổi Category & Toggle yêu cầu ảnh tham chiếu)
+    const allTabConfigHtml = `
+        <div class="p-3.5 rounded-xl bg-gradient-to-r from-dark-900 via-dark-850 to-dark-900 border border-dark-700/80 hover:border-dark-600 transition space-y-3 mb-3 shadow-md">
+            <!-- 1.1 Category Switcher -->
+            <div class="flex items-center justify-between gap-2.5 flex-wrap">
+                <div class="flex items-center gap-2 min-w-0">
+                    <div class="w-7 h-7 rounded-lg bg-brand-500/15 text-brand-400 flex items-center justify-center flex-shrink-0 border border-brand-500/20">
+                        <i class="fa-solid fa-shapes text-xs"></i>
                     </div>
-                    <p class="text-[11px] text-slate-400 truncate">Bật nếu câu lệnh này cần dùng ảnh mẫu khi tạo ảnh với AI</p>
+                    <div>
+                        <div class="text-xs font-semibold text-slate-200 flex items-center gap-1.5">
+                            <span>Danh mục (Category)</span>
+                            <span class="text-[9px] font-mono px-1.5 py-0.2 rounded bg-dark-800 text-slate-400 border border-dark-700">Phân loại</span>
+                        </div>
+                        <p class="text-[11px] text-slate-400">Chọn danh mục phù hợp cho câu lệnh này</p>
+                    </div>
+                </div>
+
+                <div class="flex items-center bg-dark-950 p-1 rounded-lg border border-dark-700 text-xs gap-1">
+                    <button type="button" onclick="updateCurrentPromptCategory('image')"
+                            class="px-2.5 py-1 rounded-md font-medium transition flex items-center gap-1.5 ${promptCat === 'image' || promptCat === 'character' ? 'bg-purple-600 text-white shadow-sm' : 'text-slate-400 hover:text-white'}"
+                            title="Chuyển sang danh mục Hình ảnh">
+                        <i class="fa-solid fa-image text-[10px]"></i>
+                        <span>Hình ảnh</span>
+                    </button>
+                    <button type="button" onclick="updateCurrentPromptCategory('video')"
+                            class="px-2.5 py-1 rounded-md font-medium transition flex items-center gap-1.5 ${promptCat === 'video' ? 'bg-gradient-to-r from-rose-600 to-pink-600 text-white shadow-sm' : 'text-slate-400 hover:text-white'}"
+                            title="Chuyển sang danh mục Video">
+                        <i class="fa-solid fa-clapperboard text-[10px]"></i>
+                        <span>Video</span>
+                    </button>
+                    <button type="button" onclick="updateCurrentPromptCategory('content')"
+                            class="px-2.5 py-1 rounded-md font-medium transition flex items-center gap-1.5 ${promptCat === 'content' ? 'bg-cyan-600 text-white shadow-sm' : 'text-slate-400 hover:text-white'}"
+                            title="Chuyển sang danh mục Bài viết">
+                        <i class="fa-solid fa-file-lines text-[10px]"></i>
+                        <span>Bài viết</span>
+                    </button>
                 </div>
             </div>
-            <label class="relative inline-flex items-center cursor-pointer flex-shrink-0" title="Bật/tắt yêu cầu ảnh tham chiếu">
-                <input type="checkbox" id="toggleRequiresReferenceInput" onchange="togglePromptRequiresReference(this.checked)" class="sr-only peer" ${needsRef ? 'checked' : ''}>
-                <div class="w-9 h-5 bg-dark-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-purple-600"></div>
-            </label>
+
+            <!-- Divider -->
+            <div class="border-t border-dark-750/70"></div>
+
+            <!-- 1.2 Reference Toggle -->
+            <div class="flex items-center justify-between gap-3">
+                <div class="flex items-center gap-2 min-w-0">
+                    <div class="w-7 h-7 rounded-lg bg-purple-500/15 text-purple-400 flex items-center justify-center flex-shrink-0 border border-purple-500/20">
+                        <i class="fa-solid fa-camera-retro text-xs"></i>
+                    </div>
+                    <div class="min-w-0">
+                        <div class="text-xs font-semibold text-slate-200 flex items-center gap-1.5">
+                            <span>Cần ảnh tham chiếu</span>
+                            <span class="text-[9px] font-mono px-1.5 py-0.2 rounded bg-purple-500/15 text-purple-300 border border-purple-500/25">Reference Image</span>
+                        </div>
+                        <p class="text-[11px] text-slate-400 truncate">Bật nếu câu lệnh cần có ảnh mẫu đối chiếu khi tạo ảnh / video</p>
+                    </div>
+                </div>
+                <label class="relative inline-flex items-center cursor-pointer flex-shrink-0" title="Bật/tắt yêu cầu ảnh tham chiếu">
+                    <input type="checkbox" id="toggleRequiresReferenceInput" onchange="togglePromptRequiresReference(this.checked)" class="sr-only peer" ${needsRef ? 'checked' : ''}>
+                    <div class="w-9 h-5 bg-dark-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-purple-600"></div>
+                </label>
+            </div>
         </div>
-    ` : '';
+    `;
 
     // 2. Reference notice banner for 'featured' tab (displayed when requires_reference is ON)
-    const refBannerHtml = (isImagePrompt && needsRef) ? `
+    const refBannerHtml = (needsRef) ? `
         <div class="p-3 rounded-xl bg-gradient-to-r from-purple-950/40 via-purple-900/20 to-dark-900/60 border border-purple-500/35 text-purple-200 text-xs flex items-start gap-2.5 shadow-sm mb-2">
             <div class="w-6 h-6 rounded-lg bg-purple-500/20 text-purple-300 flex items-center justify-center flex-shrink-0 mt-0.5 border border-purple-500/30">
                 <i class="fa-solid fa-camera-retro text-[11px]"></i>
@@ -857,7 +1307,7 @@ function renderDynamicForm(fields) {
 
     if (!fields || fields.length === 0) {
         formEl.innerHTML = `
-            ${currentTab === 'all' ? refToggleHtml : refBannerHtml}
+            ${currentTab === 'all' ? allTabConfigHtml : refBannerHtml}
             <div class="p-6 text-center text-slate-500 text-xs">
                 <i class="fa-solid fa-list-check text-xl mb-1 text-slate-600"></i>
                 <p>Không có trường tham số động cho câu lệnh này.</p>
@@ -927,8 +1377,58 @@ function renderDynamicForm(fields) {
         `;
     }).join('');
 
-    const topHeader = currentTab === 'all' ? refToggleHtml : refBannerHtml;
+    const topHeader = currentTab === 'all' ? allTabConfigHtml : refBannerHtml;
     formEl.innerHTML = topHeader + fieldsHtml;
+}
+
+async function updateCurrentPromptCategory(newCategory) {
+    if (!currentPromptId || !newCategory) return;
+    if (currentPromptDetail && currentPromptDetail.category === newCategory) return;
+
+    try {
+        const res = await fetch(`/api/prompts/${currentPromptId}/category`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ category: newCategory })
+        });
+        if (!res.ok) {
+            const err = await res.json().catch(() => ({}));
+            throw new Error(err.detail || 'Không thể cập nhật danh mục');
+        }
+        const data = await res.json();
+
+        if (currentPromptDetail) {
+            currentPromptDetail.category = newCategory;
+        }
+
+        const found = currentPromptsList.find(p => p.id === currentPromptId);
+        if (found) {
+            found.category = newCategory;
+        }
+
+        fetchStats();
+
+        const catNames = {
+            image: 'Hình ảnh 📸',
+            video: 'Video 🎬',
+            content: 'Bài viết 📝'
+        };
+        showToast(data.message || `Đã chuyển sang danh mục ${catNames[newCategory] || newCategory}!`);
+
+        // Re-render layout adapting to new category
+        renderDetail(currentPromptDetail);
+
+        // Keep active form tab on 'all'
+        setFormTab('all');
+
+        // Re-render prompt list and preserve card highlight
+        renderPromptList(currentPromptsList);
+        highlightActivePromptCard(currentPromptId);
+
+    } catch (err) {
+        console.error('Error updating prompt category:', err);
+        showToast(`Lỗi: ${err.message}`);
+    }
 }
 
 async function togglePromptRequiresReference(newStatus) {
@@ -986,15 +1486,16 @@ async function suggestAndMarkPrimaryFields() {
         return;
     }
 
-    const btn = document.getElementById('btnSuggestPrimary');
-    const originalHtml = btn ? btn.innerHTML : '';
-    if (btn) {
-        btn.disabled = true;
-        btn.innerHTML = '<i class="fa-solid fa-wand-magic-sparkles fa-spin text-amber-400 text-[11px]"></i> <span>AI đang phân tích...</span>';
+    const targetPromptId = currentPromptId;
+    const targetTitle = (currentPromptDetail && currentPromptDetail.title) || `#${targetPromptId}`;
+
+    if (hasActiveOrQueuedTask(targetPromptId, 'suggest_primary')) {
+        showToast('Tác vụ gợi ý thuộc tính cho câu lệnh này đã có trong hàng đợi hoặc đang chạy.');
+        return;
     }
 
-    try {
-        const res = await fetch(`/api/prompts/${currentPromptId}/suggest-primary-fields`, {
+    enqueueAiTask(targetPromptId, 'suggest_primary', targetTitle, async () => {
+        const res = await fetch(`/api/prompts/${targetPromptId}/suggest-primary-fields`, {
             method: 'POST'
         });
         if (!res.ok) {
@@ -1003,29 +1504,31 @@ async function suggestAndMarkPrimaryFields() {
         }
 
         const data = await res.json();
-        if (currentPromptDetail) {
-            currentPromptDetail.fields = data.fields || (data.prompt ? data.prompt.fields : currentPromptDetail.fields);
+        const newFields = data.fields || (data.prompt ? data.prompt.fields : []);
+
+        // Update in local prompts list
+        const found = currentPromptsList.find(p => p.id === targetPromptId);
+        if (found) {
+            found.fields = newFields;
         }
 
-        // Switch to featured tab so user immediately sees the marked primary fields
-        currentTab = 'featured';
-        const btnFeatured = document.getElementById('tabBtnFeatured');
-        const btnAll = document.getElementById('tabBtnAll');
-        if (btnFeatured) btnFeatured.className = 'px-3 py-1 rounded-md bg-dark-700 text-white font-medium transition flex items-center gap-1.5';
-        if (btnAll) btnAll.className = 'px-3 py-1 rounded-md text-slate-400 hover:text-white transition flex items-center gap-1.5';
+        // If user is currently looking at this prompt, update detail form
+        if (currentPromptId === targetPromptId) {
+            if (currentPromptDetail) {
+                currentPromptDetail.fields = newFields;
+            }
+            currentTab = 'featured';
+            const btnFeatured = document.getElementById('tabBtnFeatured');
+            const btnAll = document.getElementById('tabBtnAll');
+            if (btnFeatured) btnFeatured.className = 'px-3 py-1 rounded-md bg-dark-700 text-white font-medium transition flex items-center gap-1.5';
+            if (btnAll) btnAll.className = 'px-3 py-1 rounded-md text-slate-400 hover:text-white transition flex items-center gap-1.5';
 
-        renderDynamicForm(currentPromptDetail ? currentPromptDetail.fields : []);
-
-        showToast(data.message || `Đã gợi ý & đánh dấu ${data.suggested_count || 0} thuộc tính chính! ⭐`);
-    } catch (err) {
-        console.error('Error suggesting primary fields:', err);
-        showToast(`Lỗi: ${err.message}`);
-    } finally {
-        if (btn) {
-            btn.disabled = false;
-            btn.innerHTML = originalHtml;
+            renderDynamicForm(newFields);
+            showToast(data.message || `Đã gợi ý & đánh dấu ${data.suggested_count || 0} thuộc tính chính! ⭐`);
+        } else {
+            showToast(`✓ Đã gợi ý thuộc tính chính cho "${targetTitle}" và tự động lưu vào dữ liệu! ⭐`);
         }
-    }
+    });
 }
 
 function setFormTab(tab) {
@@ -1059,17 +1562,36 @@ let codeViewMode = 'live';
 function setCodeViewMode(mode) {
     codeViewMode = mode;
     const btnLive = document.getElementById('btnViewLive');
+    const btnCompact = document.getElementById('btnViewCompact');
     const btnRaw = document.getElementById('btnViewRaw');
+    const btnRegenCompact = document.getElementById('btnRegenCompact');
     const title = document.getElementById('codeBoxTitle');
 
-    if (mode === 'live') {
-        if (btnLive) btnLive.className = 'px-2.5 py-1 rounded-md bg-dark-700 text-white font-medium transition';
-        if (btnRaw) btnRaw.className = 'px-2.5 py-1 rounded-md text-slate-400 hover:text-white transition';
-        if (title) title.innerText = 'CÂU LỆNH PROMPT TÙY BIẾN';
-    } else {
-        if (btnRaw) btnRaw.className = 'px-2.5 py-1 rounded-md bg-dark-700 text-white font-medium transition';
-        if (btnLive) btnLive.className = 'px-2.5 py-1 rounded-md text-slate-400 hover:text-white transition';
-        if (title) title.innerText = 'VĂN BẢN GỐC (RAW PROMPT)';
+    const activeCls = 'px-3 py-1 rounded-md bg-dark-700 text-white font-medium transition';
+    const inactiveCls = 'px-3 py-1 rounded-md text-slate-400 hover:text-white transition';
+
+    if (btnLive) btnLive.className = (mode === 'live' ? activeCls : inactiveCls);
+    if (btnCompact) btnCompact.className = (mode === 'compact' ? activeCls : (inactiveCls + ' flex items-center gap-1.5'));
+    if (btnRaw) btnRaw.className = (mode === 'raw' ? activeCls : inactiveCls);
+
+    if (btnRegenCompact) {
+        if (mode === 'compact') {
+            btnRegenCompact.classList.remove('hidden');
+            btnRegenCompact.classList.add('flex');
+        } else {
+            btnRegenCompact.classList.add('hidden');
+            btnRegenCompact.classList.remove('flex');
+        }
+    }
+
+    if (title) {
+        if (mode === 'live') {
+            title.innerHTML = '<i class="fa-solid fa-terminal text-emerald-400 text-xs"></i> <span>CÂU LỆNH PROMPT TÙY BIẾN</span>';
+        } else if (mode === 'compact') {
+            title.innerHTML = '<i class="fa-solid fa-compress text-cyan-400 text-xs"></i> <span>CÂU LỆNH PROMPT TỐI GIẢN (≤ 1000 KÝ TỰ)</span>';
+        } else {
+            title.innerHTML = '<i class="fa-solid fa-file-lines text-slate-400 text-xs"></i> <span>VĂN BẢN GỐC (RAW PROMPT)</span>';
+        }
     }
     updatePromptCodeDisplay();
 }
@@ -1082,10 +1604,51 @@ function onFieldChange(path, newValue) {
 function updatePromptCodeDisplay() {
     if (!currentPromptDetail) return;
 
+    const codeEl = document.getElementById('promptCodeDisplay');
+    const badgeEl = document.getElementById('charCountBadge');
+    if (!codeEl) return;
+
+    if (codeViewMode === 'compact') {
+        let compactText = (currentPromptDetail.compact_prompt || '').trim();
+
+        // Nếu prompt gốc đang < 1000 ký tự thì lấy luôn nó làm prompt tối giản
+        if (!compactText) {
+            const rawSource = (currentPromptDetail.prompt_code || currentPromptDetail.raw_content || '').trim();
+            if (rawSource && rawSource.length < 1000) {
+                compactText = rawSource;
+                currentPromptDetail.compact_prompt = rawSource;
+                const found = currentPromptsList.find(p => p.id === currentPromptDetail.id);
+                if (found) found.compact_prompt = rawSource;
+                // Lưu vào DB ở chế độ nền
+                fetch(`/api/prompts/${currentPromptDetail.id}/compact`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ force_refresh: false })
+                }).catch(() => {});
+            }
+        }
+
+        if (compactText) {
+            codeEl.innerText = compactText;
+            if (badgeEl) badgeEl.innerText = `${compactText.length} / 1000 chars`;
+        } else {
+            const isProcessing = hasActiveOrQueuedTask(currentPromptDetail.id, 'compact_prompt');
+            if (isProcessing) {
+                codeEl.innerText = '⚡ Đang dùng AI tối giản prompt dưới 1000 ký tự... Vui lòng đợi trong giây lát.';
+                if (badgeEl) badgeEl.innerText = 'Đang tạo...';
+            } else {
+                codeEl.innerText = '⚡ Đang kích hoạt AI tối giản prompt dưới 1000 ký tự...';
+                if (badgeEl) badgeEl.innerText = 'Đang tạo...';
+                generateCompactPromptForCurrent(false);
+            }
+        }
+        return;
+    }
+
     let generatedCode = "";
 
     if (codeViewMode === 'raw') {
-        generatedCode = currentPromptDetail.raw_content || currentPromptDetail.prompt_code || "";
+        generatedCode = currentPromptDetail.original_raw_content || currentPromptDetail.raw_content || currentPromptDetail.prompt_code || "";
     } else {
         if (currentPromptDetail.parsed_json) {
             // Clone json object and deep update with formState
@@ -1113,9 +1676,114 @@ function updatePromptCodeDisplay() {
         }
     }
 
-    const codeEl = document.getElementById('promptCodeDisplay');
     codeEl.innerText = generatedCode;
-    document.getElementById('charCountBadge').innerText = `${generatedCode.length} chars`;
+    if (badgeEl) badgeEl.innerText = `${generatedCode.length} chars`;
+}
+
+function regenerateCompactPrompt() {
+    if (!currentPromptDetail || !currentPromptDetail.id) {
+        showToast('Vui lòng chọn một câu lệnh trước');
+        return;
+    }
+    generateCompactPromptForCurrent(true);
+}
+
+function generateCompactPromptForCurrent(force = false) {
+    if (!currentPromptDetail || !currentPromptDetail.id) return;
+
+    const targetPromptId = currentPromptDetail.id;
+    const targetTitle = currentPromptDetail.title || `#${targetPromptId}`;
+
+    // Nếu không force và prompt gốc < 1000 ký tự, lấy luôn prompt gốc làm prompt tối giản
+    if (!force) {
+        const rawSource = (currentPromptDetail.prompt_code || currentPromptDetail.raw_content || '').trim();
+        if (rawSource && rawSource.length < 1000) {
+            currentPromptDetail.compact_prompt = rawSource;
+            const found = currentPromptsList.find(p => p.id === targetPromptId);
+            if (found) found.compact_prompt = rawSource;
+            if (currentPromptId === targetPromptId && codeViewMode === 'compact') {
+                const codeEl = document.getElementById('promptCodeDisplay');
+                const badgeEl = document.getElementById('charCountBadge');
+                if (codeEl) codeEl.innerText = rawSource;
+                if (badgeEl) badgeEl.innerText = `${rawSource.length} / 1000 chars`;
+            }
+            fetch(`/api/prompts/${targetPromptId}/compact`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ force_refresh: false })
+            }).catch(() => {});
+            return;
+        }
+    }
+
+    if (hasActiveOrQueuedTask(targetPromptId, 'compact_prompt')) {
+        if (force) {
+            showToast('Tác vụ tối giản prompt cho câu lệnh này đã có trong hàng đợi hoặc đang chạy.');
+        }
+        return;
+    }
+
+    enqueueAiTask(targetPromptId, 'compact_prompt', targetTitle, async () => {
+        if (currentPromptId === targetPromptId && codeViewMode === 'compact') {
+            const codeEl = document.getElementById('promptCodeDisplay');
+            if (codeEl) codeEl.innerText = '⚡ AI đang phân tích và cô đọng câu lệnh dưới 1000 ký tự... Vui lòng đợi trong giây lát.';
+            const badgeEl = document.getElementById('charCountBadge');
+            if (badgeEl) badgeEl.innerText = 'Đang xử lý...';
+        }
+
+        try {
+            const res = await fetch(`/api/prompts/${targetPromptId}/compact`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    force_refresh: force
+                })
+            });
+
+            if (!res.ok) {
+                const err = await res.json().catch(() => ({}));
+                throw new Error(err.detail || 'Lỗi khi tạo prompt tối giản');
+            }
+
+            const data = await res.json();
+            const compactResult = data.compact_prompt || '';
+
+            // Update in currentPromptDetail if still points to targetPromptId
+            if (currentPromptDetail && currentPromptDetail.id === targetPromptId) {
+                currentPromptDetail.compact_prompt = compactResult;
+            }
+
+            // Update in currentPromptsList
+            const found = currentPromptsList.find(p => p.id === targetPromptId);
+            if (found) {
+                found.compact_prompt = compactResult;
+            }
+
+            // If user is currently viewing this prompt in compact mode, render it
+            if (currentPromptId === targetPromptId && codeViewMode === 'compact') {
+                const codeEl = document.getElementById('promptCodeDisplay');
+                const badgeEl = document.getElementById('charCountBadge');
+                if (codeEl) codeEl.innerText = compactResult;
+                if (badgeEl) badgeEl.innerText = `${compactResult.length} / 1000 chars`;
+            }
+
+            if (force) {
+                showToast('✓ Đã tạo lại và lưu prompt tối giản thành công! (≤ 1000 chars)');
+            } else {
+                showToast('✓ Đã tự động tạo và lưu prompt tối giản thành công! (≤ 1000 chars)');
+            }
+        } catch (err) {
+            if (currentPromptId === targetPromptId && codeViewMode === 'compact') {
+                const codeEl = document.getElementById('promptCodeDisplay');
+                const badgeEl = document.getElementById('charCountBadge');
+                if (codeEl) codeEl.innerText = `⚠️ Lỗi khi tạo prompt tối giản: ${err.message || err}`;
+                if (badgeEl) badgeEl.innerText = 'Lỗi';
+            }
+            throw err;
+        }
+    });
 }
 
 function setValueByPath(obj, path, value) {
@@ -1143,33 +1811,36 @@ function setValueByPath(obj, path, value) {
 
 async function convertPromptToJsonAI() {
     if (!currentPromptId || !currentPromptDetail) return;
-    const btn = document.getElementById('convertJsonBtn');
-    btn.disabled = true;
-    btn.innerHTML = '<i class="fa-solid fa-circle-notch fa-spin"></i> <span>Đang phân tích AI...</span>';
-    showToast('Đang gọi AI phân tích & chuyển đổi prompt sang JSON...');
+    const targetPromptId = currentPromptId;
+    const targetTitle = currentPromptDetail.title || `#${targetPromptId}`;
 
-    try {
-        const res = await fetch(`/api/prompts/${currentPromptId}/convert-json`, {
+    if (hasActiveOrQueuedTask(targetPromptId, 'convert_json')) {
+        showToast('Tác vụ chuyển JSON cho câu lệnh này đã có trong hàng đợi hoặc đang chạy.');
+        return;
+    }
+
+    enqueueAiTask(targetPromptId, 'convert_json', targetTitle, async () => {
+        const res = await fetch(`/api/prompts/${targetPromptId}/convert-json`, {
             method: 'POST'
         });
 
         if (!res.ok) {
-            const errData = await res.json();
-            throw new Error(errData.detail || 'Lỗi khi gọi AI');
+            const errData = await res.json().catch(() => ({}));
+            throw new Error(errData.detail || 'Lỗi khi gọi AI chuyển JSON');
         }
 
         const updatedPrompt = await res.json();
-        currentPromptDetail = updatedPrompt;
 
         // Update in local prompts list
-        const found = currentPromptsList.find(p => p.id === currentPromptId);
+        const found = currentPromptsList.find(p => p.id === targetPromptId);
         if (found) {
             found.prompt_type = 'json';
             found.parsed_json = updatedPrompt.parsed_json;
+            found.fields = updatedPrompt.fields;
         }
 
-        // Re-render sidebar card type badge
-        const card = document.getElementById(`prompt-card-${currentPromptId}`);
+        // Update sidebar card badge
+        const card = document.getElementById(`prompt-card-${targetPromptId}`);
         if (card) {
             const typeBadge = card.querySelector('span:last-child');
             if (typeBadge) {
@@ -1178,20 +1849,21 @@ async function convertPromptToJsonAI() {
             }
         }
 
-        // Re-render detail view with newly generated dynamic form
-        renderDetail(currentPromptDetail);
-        showToast('Đã chuyển đổi sang cấu trúc JSON thành công!');
-    } catch (err) {
-        console.error('AI Convert error:', err);
-        showToast(`Lỗi: ${err.message}`);
-    } finally {
-        btn.disabled = false;
-        btn.innerHTML = '<i class="fa-solid fa-wand-magic-sparkles text-amber-300"></i> <span>Chuyển sang JSON</span>';
-    }
+        // If user is currently looking at this prompt, update detail view
+        if (currentPromptId === targetPromptId) {
+            currentPromptDetail = updatedPrompt;
+            renderDetail(currentPromptDetail);
+            showToast(`Đã chuyển đổi "${targetTitle}" sang cấu trúc JSON thành công!`);
+        } else {
+            showToast(`✓ "${targetTitle}" đã chuyển sang JSON thành công và tự động cập nhật vào dữ liệu!`);
+        }
+    });
 }
 
 async function extractJsonFromCurrentImage() {
     if (!currentPromptId || !currentPromptDetail) return;
+    const targetPromptId = currentPromptId;
+    const targetTitle = currentPromptDetail.title || `#${targetPromptId}`;
 
     const sliderImg = document.getElementById('currentSliderImg');
     if (!sliderImg || sliderImg.classList.contains('hidden') || !sliderImg.src) {
@@ -1201,15 +1873,13 @@ async function extractJsonFromCurrentImage() {
 
     const imgUrl = sliderImg.src;
 
-    const btn = document.getElementById('btnExtractJsonFromImg');
-    if (btn) {
-        btn.disabled = true;
-        btn.innerHTML = '<i class="fa-solid fa-circle-notch fa-spin text-indigo-200"></i> <span>Đang phân tích...</span>';
+    if (hasActiveOrQueuedTask(targetPromptId, 'extract_json_image')) {
+        showToast('Tác vụ phân tích ảnh này đã có trong hàng đợi hoặc đang chạy.');
+        return;
     }
-    showToast('Đang gọi AI phân tích ảnh để lấy JSON gốc...');
 
-    try {
-        const res = await fetch(`/api/prompts/${currentPromptId}/extract-json-from-image`, {
+    enqueueAiTask(targetPromptId, 'extract_json_image', targetTitle, async () => {
+        const res = await fetch(`/api/prompts/${targetPromptId}/extract-json-from-image`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ image: imgUrl })
@@ -1225,16 +1895,7 @@ async function extractJsonFromCurrentImage() {
         // Refresh stats & list, select newly created prompt
         await fetchStats();
         await loadPrompts(data.prompt.id);
-
-    } catch (err) {
-        console.error('Extract JSON from image error:', err);
-        showToast(`Lỗi: ${err.message}`);
-    } finally {
-        if (btn) {
-            btn.disabled = false;
-            btn.innerHTML = '<i class="fa-solid fa-code text-[11px] text-indigo-200"></i><span>Lấy json từ ảnh này</span>';
-        }
-    }
+    });
 }
 
 async function deleteCurrentPrompt() {
@@ -1319,15 +1980,16 @@ async function generateTitleAI() {
         return;
     }
 
-    const btn = document.getElementById('btnGenerateTitleAI');
-    if (!btn) return;
+    const targetPromptId = currentPromptId;
+    const targetTitle = (currentPromptDetail && currentPromptDetail.title) || `#${targetPromptId}`;
 
-    const originalHtml = btn.innerHTML;
-    btn.disabled = true;
-    btn.innerHTML = '<i class="fa-solid fa-circle-notch fa-spin text-[11px] text-amber-300"></i><span>Đang đặt tên...</span>';
+    if (hasActiveOrQueuedTask(targetPromptId, 'suggest_title')) {
+        showToast('Tác vụ đặt tên cho câu lệnh này đã có trong hàng đợi hoặc đang chạy.');
+        return;
+    }
 
-    try {
-        const res = await fetch(`/api/prompts/${currentPromptId}/suggest-title`, {
+    enqueueAiTask(targetPromptId, 'suggest_title', targetTitle, async () => {
+        const res = await fetch(`/api/prompts/${targetPromptId}/suggest-title`, {
             method: 'POST'
         });
 
@@ -1340,36 +2002,33 @@ async function generateTitleAI() {
         const newTitle = data.title;
 
         if (newTitle) {
-            // Update title in detail view
-            const titleEl = document.getElementById('currentPromptTitle');
-            if (titleEl) {
-                titleEl.innerText = newTitle;
-            }
-
             // Update in memory states
-            if (currentPromptDetail) {
-                currentPromptDetail.title = newTitle;
-            }
-            const found = currentPromptsList.find(p => p.id === currentPromptId);
+            const found = currentPromptsList.find(p => p.id === targetPromptId);
             if (found) {
                 found.title = newTitle;
             }
 
             // Update sidebar card text
-            const cardTitle = document.querySelector(`#prompt-card-${currentPromptId} h4`);
+            const cardTitle = document.querySelector(`#prompt-card-${targetPromptId} h4`);
             if (cardTitle) {
                 cardTitle.innerText = newTitle;
             }
 
-            showToast(`AI đã áp dụng tiêu đề mới: "${newTitle}"`);
+            // If user is currently looking at this prompt, update title in detail view
+            if (currentPromptId === targetPromptId) {
+                const titleEl = document.getElementById('currentPromptTitle');
+                if (titleEl) {
+                    titleEl.innerText = newTitle;
+                }
+                if (currentPromptDetail) {
+                    currentPromptDetail.title = newTitle;
+                }
+                showToast(`AI đã áp dụng tiêu đề mới: "${newTitle}"`);
+            } else {
+                showToast(`✓ AI đã cập nhật tiêu đề mới cho "${targetTitle}": "${newTitle}"`);
+            }
         }
-    } catch (err) {
-        console.error('generateTitleAI error:', err);
-        showToast(`Lỗi: ${err.message}`);
-    } finally {
-        btn.disabled = false;
-        btn.innerHTML = originalHtml;
-    }
+    });
 }
 
 
@@ -1645,23 +2304,17 @@ function switchNavTab(tab, targetPromptId = null, updateRoute = true) {
     currentNavTab = tab;
 
     const btnImage = document.getElementById('navTabImage') || document.getElementById('navTabCharacter');
+    const btnVideo = document.getElementById('navTabVideo');
     const btnContent = document.getElementById('navTabContent');
 
-    if (tab === 'image') {
-        if (btnImage) {
-            btnImage.className = 'px-3.5 py-1.5 rounded-lg text-xs font-semibold transition-all duration-200 flex items-center gap-2 bg-gradient-to-r from-brand-600 to-emerald-600 text-white shadow-md shadow-brand-600/20';
-        }
-        if (btnContent) {
-            btnContent.className = 'px-3.5 py-1.5 rounded-lg text-xs font-medium transition-all duration-200 flex items-center gap-2 text-slate-400 hover:text-white hover:bg-dark-750';
-        }
-    } else {
-        if (btnContent) {
-            btnContent.className = 'px-3.5 py-1.5 rounded-lg text-xs font-semibold transition-all duration-200 flex items-center gap-2 bg-gradient-to-r from-cyan-600 to-teal-600 text-white shadow-md shadow-cyan-600/20';
-        }
-        if (btnImage) {
-            btnImage.className = 'px-3.5 py-1.5 rounded-lg text-xs font-medium transition-all duration-200 flex items-center gap-2 text-slate-400 hover:text-white hover:bg-dark-750';
-        }
-    }
+    const activeImageClasses = 'px-3.5 py-1.5 rounded-lg text-xs font-semibold transition-all duration-200 flex items-center gap-2 bg-gradient-to-r from-brand-600 to-emerald-600 text-white shadow-md shadow-brand-600/20';
+    const activeVideoClasses = 'px-3.5 py-1.5 rounded-lg text-xs font-semibold transition-all duration-200 flex items-center gap-2 bg-gradient-to-r from-rose-600 to-pink-600 text-white shadow-md shadow-rose-600/20';
+    const activeContentClasses = 'px-3.5 py-1.5 rounded-lg text-xs font-semibold transition-all duration-200 flex items-center gap-2 bg-gradient-to-r from-cyan-600 to-teal-600 text-white shadow-md shadow-cyan-600/20';
+    const inactiveClasses = 'px-3.5 py-1.5 rounded-lg text-xs font-medium transition-all duration-200 flex items-center gap-2 text-slate-400 hover:text-white hover:bg-dark-750';
+
+    if (btnImage) btnImage.className = (tab === 'image' ? activeImageClasses : inactiveClasses);
+    if (btnVideo) btnVideo.className = (tab === 'video' ? activeVideoClasses : inactiveClasses);
+    if (btnContent) btnContent.className = (tab === 'content' ? activeContentClasses : inactiveClasses);
 
     // Immediate visual toggle of media vs content container
     const genImageBtn = document.getElementById('generateImageBtn');
@@ -1691,9 +2344,20 @@ function switchNavTab(tab, targetPromptId = null, updateRoute = true) {
             tagFilters.innerHTML = `
                 <button onclick="filterByTag('all', event)" class="tag-btn active px-2.5 py-1 rounded-md bg-brand-600 text-white font-medium whitespace-nowrap transition">Tất cả</button>
                 <button onclick="filterByTag('has_sample', event)" class="tag-btn px-2.5 py-1 rounded-md bg-dark-700 hover:bg-dark-600 text-slate-300 whitespace-nowrap transition">Có content mẫu</button>
-                <button onclick="filterByTag('video', event)" class="tag-btn px-2.5 py-1 rounded-md bg-dark-700 hover:bg-dark-600 text-slate-300 whitespace-nowrap transition">Kịch bản Video</button>
                 <button onclick="filterByTag('seo', event)" class="tag-btn px-2.5 py-1 rounded-md bg-dark-700 hover:bg-dark-600 text-slate-300 whitespace-nowrap transition">Bài viết SEO</button>
                 <button onclick="filterByTag('live', event)" class="tag-btn px-2.5 py-1 rounded-md bg-dark-700 hover:bg-dark-600 text-slate-300 whitespace-nowrap transition">Livestream</button>
+                <button onclick="filterByTag('json', event)" class="tag-btn px-2.5 py-1 rounded-md bg-dark-700 hover:bg-dark-600 text-slate-300 whitespace-nowrap transition">JSON</button>
+                <button onclick="filterByTag('text', event)" class="tag-btn px-2.5 py-1 rounded-md bg-dark-700 hover:bg-dark-600 text-slate-300 whitespace-nowrap transition">Văn bản</button>
+            `;
+        } else if (tab === 'video') {
+            tagFilters.innerHTML = `
+                <button onclick="filterByTag('all', event)" class="tag-btn active px-2.5 py-1 rounded-md bg-brand-600 text-white font-medium whitespace-nowrap transition">Tất cả</button>
+                <button onclick="filterByTag('KOC', event)" class="tag-btn px-2.5 py-1 rounded-md bg-dark-700 hover:bg-dark-600 text-slate-300 whitespace-nowrap transition">KOC AI</button>
+                <button onclick="filterByTag('storyboard', event)" class="tag-btn px-2.5 py-1 rounded-md bg-dark-700 hover:bg-dark-600 text-slate-300 whitespace-nowrap transition">Storyboard</button>
+                <button onclick="filterByTag('Kịch bản Video', event)" class="tag-btn px-2.5 py-1 rounded-md bg-dark-700 hover:bg-dark-600 text-slate-300 whitespace-nowrap transition">Kịch bản</button>
+                <button onclick="filterByTag('TikTok', event)" class="tag-btn px-2.5 py-1 rounded-md bg-dark-700 hover:bg-dark-600 text-slate-300 whitespace-nowrap transition">TikTok</button>
+                <button onclick="filterByTag('YouTube', event)" class="tag-btn px-2.5 py-1 rounded-md bg-dark-700 hover:bg-dark-600 text-slate-300 whitespace-nowrap transition">YouTube</button>
+                <button onclick="filterByTag('has_img', event)" class="tag-btn px-2.5 py-1 rounded-md bg-dark-700 hover:bg-dark-600 text-slate-300 whitespace-nowrap transition">Có ảnh mẫu</button>
                 <button onclick="filterByTag('json', event)" class="tag-btn px-2.5 py-1 rounded-md bg-dark-700 hover:bg-dark-600 text-slate-300 whitespace-nowrap transition">JSON</button>
                 <button onclick="filterByTag('text', event)" class="tag-btn px-2.5 py-1 rounded-md bg-dark-700 hover:bg-dark-600 text-slate-300 whitespace-nowrap transition">Văn bản</button>
             `;
@@ -1715,7 +2379,13 @@ function switchNavTab(tab, targetPromptId = null, updateRoute = true) {
     // Search input placeholder
     const searchInput = document.getElementById('searchInput');
     if (searchInput) {
-        searchInput.placeholder = tab === 'content' ? 'Tìm theo nội dung, chú thích...' : 'Tìm theo tiêu đề, từ khóa...';
+        if (tab === 'content') {
+            searchInput.placeholder = 'Tìm theo nội dung, chú thích...';
+        } else if (tab === 'video') {
+            searchInput.placeholder = 'Tìm câu lệnh video, storyboard, kịch bản...';
+        } else {
+            searchInput.placeholder = 'Tìm theo tiêu đề, từ khóa...';
+        }
         searchInput.value = '';
     }
 
@@ -1946,6 +2616,7 @@ function renderEmptyDetail() {
     renderSampleContent([]);
     renderPromptTags([]);
     closeTagAutocomplete();
+    syncDetailPaneButtonStates(null);
 }
 
 // ==========================================
@@ -2921,6 +3592,14 @@ let genTimerSeconds = 0;
 let currentGenProvider = 'openai';
 let providerConfigCache = null;
 
+let currentRefSource = 'none'; // 'none' | 'koc' | 'upload' | 'existing'
+let selectedKocImagePath = null;
+let selectedKocImageObj = null;
+let pendingUploadFileData = null;
+let kocListCache = null;
+let kocImagesCache = {};
+let currentActiveRefTab = 'koc';
+
 async function fetchProviderConfig() {
     try {
         const res = await fetch('/api/config/providers');
@@ -3074,6 +3753,8 @@ async function openGenerateImageModal(promptId = null) {
 
     // Reset reference image
     clearGenRefImage();
+    switchRefTab('koc');
+    loadKocList(false);
 
     // Populate existing images thumbnails if any
     const existingBox = document.getElementById('genExistingImagesBox');
@@ -3129,78 +3810,300 @@ function closeGenerateImageModal() {
     }
 }
 
-function handleRefFileSelect(event) {
-    const file = event.target.files && event.target.files[0];
-    if (file) {
-        processRefImageFile(file);
+function switchRefTab(tab) {
+    currentActiveRefTab = tab;
+    const btnKoc = document.getElementById('btnRefTabKoc');
+    const btnUpload = document.getElementById('btnRefTabUpload');
+    const kocContent = document.getElementById('refTabKocContent');
+    const uploadContent = document.getElementById('refTabUploadContent');
+
+    if (tab === 'koc') {
+        if (btnKoc) btnKoc.className = 'px-2.5 py-1 rounded-md font-medium transition flex items-center gap-1.5 bg-purple-600 text-white shadow';
+        if (btnUpload) btnUpload.className = 'px-2.5 py-1 rounded-md font-medium text-slate-400 hover:text-white transition flex items-center gap-1.5';
+        if (kocContent) kocContent.classList.remove('hidden');
+        if (uploadContent) uploadContent.classList.add('hidden');
+        if (!kocListCache) {
+            loadKocList(false);
+        }
+    } else {
+        if (btnUpload) btnUpload.className = 'px-2.5 py-1 rounded-md font-medium transition flex items-center gap-1.5 bg-purple-600 text-white shadow';
+        if (btnKoc) btnKoc.className = 'px-2.5 py-1 rounded-md font-medium text-slate-400 hover:text-white transition flex items-center gap-1.5';
+        if (uploadContent) uploadContent.classList.remove('hidden');
+        if (kocContent) kocContent.classList.add('hidden');
     }
 }
 
-async function processRefImageFile(file) {
-    if (!file.type.startsWith('image/')) { showGenError('Vui lòng chọn file ảnh hợp lệ.'); return; }
-    if (file.size > 15 * 1024 * 1024) { showGenError('Ảnh tham chiếu không được vượt quá 15MB.'); return; }
-    referenceImageUploadPending = true;
-    currentRefImageData = null;
-    const reader = new FileReader();
-    reader.onload = async function (e) {
-        const localPreview = e.target.result;
-        document.getElementById('genRefImagePreviewImg').src = localPreview;
-        document.getElementById('genRefImagePreview').classList.remove('hidden');
-        try {
-            const response = await fetch('/api/reference-images/upload', {
-                method: 'POST', headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ image: localPreview })
-            });
-            const data = await response.json();
-            if (!response.ok || !data.url) throw new Error(data.detail || 'Không nhận được URL S3');
-            currentRefImageData = data.url;
-            document.getElementById('genRefImagePreviewImg').src = data.url;
-            showToast('Đã tải ảnh tham chiếu lên S3 (link dùng trong 1 giờ)');
-        } catch (error) {
-            currentRefImageData = null; clearGenRefImage();
-            showGenError('Upload ảnh tham chiếu thất bại: ' + error.message);
-        } finally { referenceImageUploadPending = false; }
-    };
-    reader.onerror = function () {
-        referenceImageUploadPending = false; currentRefImageData = null;
-        showGenError('Không thể đọc file ảnh.');
-    };
-    reader.readAsDataURL(file);
+async function loadKocList(forceRefresh = false) {
+    const select = document.getElementById('genKocSelect');
+    const icon = document.getElementById('kocRefreshIcon');
+    if (icon) icon.classList.add('fa-spin');
+
+    if (select && (!kocListCache || forceRefresh)) {
+        select.innerHTML = '<option value="">-- Đang nạp danh sách KOC... --</option>';
+        select.disabled = true;
+    }
+
+    try {
+        const res = await fetch(`/api/koc/list?refresh=${forceRefresh ? 'true' : 'false'}`);
+        const data = await res.json();
+        if (!res.ok || data.status !== 'success') {
+            throw new Error(data.detail || 'Không thể tải danh sách KOC');
+        }
+
+        kocListCache = data.kocs || [];
+        if (select) {
+            select.disabled = false;
+            if (kocListCache.length === 0) {
+                select.innerHTML = '<option value="">-- Không có KOC nào --</option>';
+            } else {
+                const prevVal = select.value;
+                select.innerHTML = [
+                    `<option value="">-- Chọn nhân vật KOC (${kocListCache.length}) --</option>`,
+                    ...kocListCache.map(k => `<option value="${escapeHtml(k.name)}">${escapeHtml(k.name)} (${k.count} ảnh)</option>`)
+                ].join('');
+
+                if (prevVal && kocListCache.some(k => k.name === prevVal)) {
+                    select.value = prevVal;
+                    onKocSelectChange();
+                }
+            }
+        }
+        if (forceRefresh) {
+            showToast('Đã quét và làm mới danh sách KOC');
+        }
+    } catch (err) {
+        console.error('Failed to load KOC list:', err);
+        if (select) {
+            select.disabled = false;
+            select.innerHTML = '<option value="">-- Lỗi nạp danh sách KOC --</option>';
+        }
+        showGenError('Không thể lấy danh sách KOC từ koc_management: ' + err.message);
+    } finally {
+        if (icon) icon.classList.remove('fa-spin');
+    }
 }
 
-function removeRefImage() {
-    currentRefImageData = null;
-    const fileInput = document.getElementById('genRefFileInput');
-    if (fileInput) fileInput.value = '';
-    const previewBox = document.getElementById('genRefPreviewBox');
-    if (previewBox) previewBox.classList.add('hidden');
-    const dropzone = document.getElementById('genRefDropzone');
-    if (dropzone) dropzone.classList.remove('hidden');
+async function onKocSelectChange() {
+    const select = document.getElementById('genKocSelect');
+    const kocName = select ? select.value : '';
+    const container = document.getElementById('kocGalleryContainer');
+    const nameText = document.getElementById('kocSelectedNameText');
+    const countBadge = document.getElementById('kocSelectedCountBadge');
+    const listEl = document.getElementById('kocImagesList');
+
+    if (!kocName) {
+        if (container) container.classList.add('hidden');
+        if (currentRefSource === 'koc') {
+            clearGenRefImage();
+        }
+        return;
+    }
+
+    if (nameText) nameText.innerText = kocName;
+    if (container) container.classList.remove('hidden');
+    if (listEl) {
+        listEl.innerHTML = '<div class="col-span-full py-4 text-center text-xs text-slate-400"><i class="fa-solid fa-spinner fa-spin mr-1.5 text-purple-400"></i> Đang nạp danh sách ảnh...</div>';
+    }
+
+    try {
+        let images = kocImagesCache[kocName];
+        if (!images) {
+            const res = await fetch(`/api/koc/images?name=${encodeURIComponent(kocName)}`);
+            const data = await res.json();
+            if (!res.ok || data.status !== 'success') {
+                throw new Error(data.detail || 'Không thể lấy ảnh KOC');
+            }
+            images = data.images || [];
+            kocImagesCache[kocName] = images;
+        }
+
+        if (countBadge) countBadge.innerText = `${images.length} ảnh`;
+
+        if (!images || images.length === 0) {
+            if (listEl) listEl.innerHTML = '<div class="col-span-full py-4 text-center text-xs text-slate-500">Chưa có ảnh nào cho KOC này</div>';
+            return;
+        }
+
+        if (listEl) {
+            listEl.innerHTML = images.map((img, idx) => {
+                const isSelected = selectedKocImagePath === img.path;
+                const encodedImg = encodeURIComponent(JSON.stringify(img));
+                return `
+                    <button type="button" onclick="selectKocImage('${encodedImg}')"
+                            id="kocCard_${idx}"
+                            class="koc-image-card relative group rounded-lg overflow-hidden border-2 transition aspect-square bg-dark-900 flex flex-col justify-end p-1 text-left ${isSelected ? 'border-purple-500 ring-2 ring-purple-500/50 bg-purple-500/10' : 'border-dark-700 hover:border-purple-400/80'}"
+                            title="${escapeHtml(img.name)}${img.caption ? ' - ' + escapeHtml(img.caption) : ''}">
+                        <img src="${img.url}" class="absolute inset-0 w-full h-full object-cover group-hover:scale-105 transition" loading="lazy" onerror="this.src='/static/favicon.png'">
+                        <div class="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition"></div>
+                        <span class="koc-selected-badge absolute top-1 right-1 w-4 h-4 rounded-full bg-purple-600 text-white flex items-center justify-center text-[9px] shadow ${isSelected ? '' : 'hidden'}">
+                            <i class="fa-solid fa-check"></i>
+                        </span>
+                        <span class="relative z-10 text-[9px] text-slate-200 truncate w-full px-1 py-0.5 rounded bg-black/70 backdrop-blur-xs font-mono">
+                            ${escapeHtml(img.name)}
+                        </span>
+                    </button>
+                `;
+            }).join('');
+        }
+    } catch (err) {
+        console.error('Failed to load KOC images:', err);
+        if (listEl) listEl.innerHTML = `<div class="col-span-full py-4 text-center text-xs text-rose-400">Lỗi: ${escapeHtml(err.message)}</div>`;
+    }
 }
 
-function selectExistingImageAsRef(src) {
-    if (!src) return;
-    currentRefImageData = src;
-    document.getElementById('genRefPreviewImg').src = src;
-    document.getElementById('genRefFileName').innerText = 'Ảnh mẫu từ bản ghi';
-    document.getElementById('genRefFileSize').innerText = 'Đã chọn';
-    document.getElementById('genRefPreviewBox').classList.remove('hidden');
-    document.getElementById('genRefDropzone').classList.add('hidden');
-    document.getElementById('genErrorBanner').classList.add('hidden');
+function selectKocImage(encodedImgJson) {
+    try {
+        const img = JSON.parse(decodeURIComponent(encodedImgJson));
+        const select = document.getElementById('genKocSelect');
+        const kocName = select ? select.value : 'KOC';
+
+        currentRefSource = 'koc';
+        selectedKocImagePath = img.path;
+        selectedKocImageObj = img;
+        pendingUploadFileData = null;
+        currentRefImageData = null; // Sẽ upload lên S3 khi bấm "Tạo ảnh ngay"
+
+        // Update card styles
+        document.querySelectorAll('.koc-image-card').forEach(card => {
+            card.classList.remove('border-purple-500', 'ring-2', 'ring-purple-500/50', 'bg-purple-500/10');
+            card.classList.add('border-dark-700');
+            const badge = card.querySelector('.koc-selected-badge');
+            if (badge) badge.classList.add('hidden');
+        });
+
+        // Highlight selected card
+        const allCards = document.querySelectorAll('.koc-image-card');
+        allCards.forEach(card => {
+            if (card.title.includes(img.name)) {
+                card.classList.remove('border-dark-700');
+                card.classList.add('border-purple-500', 'ring-2', 'ring-purple-500/50', 'bg-purple-500/10');
+                const badge = card.querySelector('.koc-selected-badge');
+                if (badge) badge.classList.remove('hidden');
+            }
+        });
+
+        // Show preview box
+        const previewBox = document.getElementById('genRefImagePreview');
+        const previewImg = document.getElementById('genRefImagePreviewImg');
+        const sourceBadge = document.getElementById('genRefSourceBadge');
+        const captionBox = document.getElementById('genRefImageCaptionBox');
+
+        if (previewImg) previewImg.src = img.url;
+        if (sourceBadge) sourceBadge.innerText = `KOC: ${kocName}`;
+        if (captionBox) {
+            captionBox.innerHTML = `
+                <div class="font-medium text-slate-200 truncate">${escapeHtml(img.name)}</div>
+                <div class="text-[10px] text-slate-400 mt-0.5 line-clamp-2">${escapeHtml(img.caption || 'Chưa có chú thích')}</div>
+            `;
+            captionBox.classList.remove('hidden');
+        }
+        if (previewBox) previewBox.classList.remove('hidden');
+        document.getElementById('genErrorBanner')?.classList.add('hidden');
+
+        showToast(`Đã chọn ảnh của ${kocName}`);
+    } catch (e) {
+        console.error('Failed to select KOC image:', e);
+    }
 }
 
 function handleGenRefImageUpload(event) {
     const file = event.target.files && event.target.files[0];
     if (!file) return;
-    processRefImageFile(file);
+    if (!file.type.startsWith('image/')) {
+        showGenError('Vui lòng chọn file ảnh hợp lệ (PNG, JPG, WEBP).');
+        return;
+    }
+    if (file.size > 15 * 1024 * 1024) {
+        showGenError('Ảnh tham chiếu không được vượt quá 15MB.');
+        return;
+    }
+
+    const reader = new FileReader();
+    reader.onload = function(e) {
+        const localData = e.target.result;
+        currentRefSource = 'upload';
+        pendingUploadFileData = localData;
+        selectedKocImagePath = null;
+        selectedKocImageObj = null;
+        currentRefImageData = null; // Sẽ upload lên S3 khi bấm "Tạo ảnh ngay"
+
+        // Unhighlight any KOC cards
+        document.querySelectorAll('.koc-image-card').forEach(card => {
+            card.classList.remove('border-purple-500', 'ring-2', 'ring-purple-500/50', 'bg-purple-500/10');
+            card.classList.add('border-dark-700');
+            const badge = card.querySelector('.koc-selected-badge');
+            if (badge) badge.classList.add('hidden');
+        });
+
+        // Show preview box
+        const previewBox = document.getElementById('genRefImagePreview');
+        const previewImg = document.getElementById('genRefImagePreviewImg');
+        const sourceBadge = document.getElementById('genRefSourceBadge');
+        const captionBox = document.getElementById('genRefImageCaptionBox');
+
+        if (previewImg) previewImg.src = localData;
+        if (sourceBadge) sourceBadge.innerText = `Tệp tải lên: ${file.name}`;
+        if (captionBox) {
+            captionBox.innerHTML = `
+                <div class="font-medium text-slate-200 truncate">${escapeHtml(file.name)}</div>
+                <div class="text-[10px] text-slate-400 mt-0.5">Dung lượng: ${formatFileSize(file.size)} • Sẵn sàng tải lên S3 khi tạo ảnh</div>
+            `;
+            captionBox.classList.remove('hidden');
+        }
+        if (previewBox) previewBox.classList.remove('hidden');
+        document.getElementById('genErrorBanner')?.classList.add('hidden');
+
+        showToast('Đã nạp ảnh từ máy tính (sẽ upload lên S3 khi bấm Tạo ảnh ngay)');
+    };
+    reader.onerror = function() {
+        showGenError('Không thể đọc file ảnh từ máy tính.');
+    };
+    reader.readAsDataURL(file);
 }
 
 function clearGenRefImage() {
+    currentRefSource = 'none';
+    selectedKocImagePath = null;
+    selectedKocImageObj = null;
+    pendingUploadFileData = null;
     currentRefImageData = null;
-    document.getElementById('genRefImageUpload').value = '';
-    document.getElementById('genRefImageLabel').innerText = 'Tải ảnh tham chiếu lên';
-    document.getElementById('genRefImagePreview').classList.add('hidden');
-    document.getElementById('genErrorBanner').classList.add('hidden');
+    referenceImageUploadPending = false;
+
+    const fileInput = document.getElementById('genRefImageUpload');
+    if (fileInput) fileInput.value = '';
+
+    const previewBox = document.getElementById('genRefImagePreview');
+    if (previewBox) previewBox.classList.add('hidden');
+
+    document.querySelectorAll('.koc-image-card').forEach(card => {
+        card.classList.remove('border-purple-500', 'ring-2', 'ring-purple-500/50', 'bg-purple-500/10');
+        card.classList.add('border-dark-700');
+        const badge = card.querySelector('.koc-selected-badge');
+        if (badge) badge.classList.add('hidden');
+    });
+}
+
+function selectExistingImageAsRef(src) {
+    if (!src) return;
+    currentRefSource = 'existing';
+    currentRefImageData = src;
+    selectedKocImagePath = null;
+    selectedKocImageObj = null;
+    pendingUploadFileData = null;
+
+    const previewBox = document.getElementById('genRefImagePreview');
+    const previewImg = document.getElementById('genRefImagePreviewImg');
+    const sourceBadge = document.getElementById('genRefSourceBadge');
+    const captionBox = document.getElementById('genRefImageCaptionBox');
+
+    if (previewImg) previewImg.src = src;
+    if (sourceBadge) sourceBadge.innerText = 'Ảnh mẫu từ bản ghi';
+    if (captionBox) {
+        captionBox.innerHTML = '<div class="text-[10px] text-slate-400">Đã chọn ảnh mẫu có sẵn của câu lệnh này làm ảnh tham chiếu</div>';
+        captionBox.classList.remove('hidden');
+    }
+    if (previewBox) previewBox.classList.remove('hidden');
+    document.getElementById('genErrorBanner')?.classList.add('hidden');
 }
 
 function showGenError(msg) {
@@ -3237,20 +4140,59 @@ async function submitGenerateImage() {
     const genQuality = document.getElementById('genQualitySelect')?.value || 'hd';
     const genDetail = document.getElementById('genDetailSelect')?.value || 'high';
 
-    if (referenceImageUploadPending) {
-        showGenError('Ảnh tham chiếu đang tải lên S3, vui lòng đợi hoàn tất rồi tạo ảnh.');
-        return;
-    }
-
-    // UI state: loading
+    // UI state: reset banners
     document.getElementById('genErrorBanner').classList.add('hidden');
     document.getElementById('genResultSection').classList.add('hidden');
-    document.getElementById('genLoadingState').classList.remove('hidden');
 
     const btnSubmit = document.getElementById('btnSubmitGenerate');
     const btnText = document.getElementById('btnSubmitGenerateText');
-    btnSubmit.disabled = true;
-    btnText.innerText = 'Đang xử lý...';
+    if (btnSubmit) btnSubmit.disabled = true;
+
+    // 1. Upload reference image to S3 if not uploaded yet
+    let refImageUrl = currentRefImageData;
+    if (!refImageUrl) {
+        let uploadTarget = null;
+        let uploadMsg = '';
+
+        if (currentRefSource === 'koc' && selectedKocImagePath) {
+            uploadTarget = selectedKocImagePath;
+            uploadMsg = 'Đang tải ảnh KOC lên S3...';
+        } else if (currentRefSource === 'upload' && pendingUploadFileData) {
+            uploadTarget = pendingUploadFileData;
+            uploadMsg = 'Đang tải ảnh lên S3...';
+        }
+
+        if (uploadTarget) {
+            if (btnText) btnText.innerText = uploadMsg;
+            referenceImageUploadPending = true;
+            try {
+                const uploadRes = await fetch('/api/reference-images/upload', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ image: uploadTarget })
+                });
+                const uploadData = await uploadRes.json();
+                if (!uploadRes.ok || !uploadData.url) {
+                    throw new Error(uploadData.detail || uploadData.message || 'Không nhận được URL từ S3');
+                }
+                refImageUrl = uploadData.url;
+                currentRefImageData = refImageUrl;
+                showToast('Đã tải ảnh tham chiếu lên S3 thành công');
+            } catch (uploadErr) {
+                referenceImageUploadPending = false;
+                if (btnSubmit) btnSubmit.disabled = false;
+                if (btnText) btnText.innerText = 'Tạo ảnh ngay';
+                showGenError('Tải ảnh lên S3 thất bại: ' + uploadErr.message);
+                return;
+            } finally {
+                referenceImageUploadPending = false;
+            }
+        }
+    }
+
+    // 2. AI Image Generation
+    document.getElementById('genLoadingState').classList.remove('hidden');
+    if (btnText) btnText.innerText = 'Đang tạo ảnh AI...';
 
     // Timer counter
     genTimerSeconds = 0;
@@ -3271,7 +4213,7 @@ async function submitGenerateImage() {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
                 prompt: promptText,
-                reference_image: currentRefImageData,
+                reference_image: refImageUrl,
                 extra_description: extraDesc,
                 size: genSize,
                 quality: genQuality,
@@ -3495,6 +4437,11 @@ async function openImproveModal(promptId = null) {
         await selectPrompt(promptId, true);
     }
 
+    if (currentPromptId && hasBackgroundTask(currentPromptId, 'improve_prompt')) {
+        showToast('Tác vụ cải tiến câu lệnh này đang được xử lý trong nền...');
+        return;
+    }
+
     if (!currentPromptDetail && currentPromptId) {
         try {
             const res = await fetch(`/api/prompts/${currentPromptId}`);
@@ -3613,6 +4560,9 @@ async function submitImprovePrompt() {
         return;
     }
 
+    const targetPromptId = currentPromptId;
+    const targetTitle = (currentPromptDetail && currentPromptDetail.title) || `#${targetPromptId}`;
+
     const instructionInput = document.getElementById('improveInstructionInput');
     const instruction = instructionInput ? instructionInput.value.trim() : '';
     if (!instruction) {
@@ -3621,16 +4571,24 @@ async function submitImprovePrompt() {
         return;
     }
 
+    if (hasActiveOrQueuedTask(targetPromptId, 'improve_prompt')) {
+        showToast('Tác vụ cải tiến câu lệnh này đã có trong hàng đợi hoặc đang chạy.');
+        return;
+    }
+
     document.getElementById('improveErrorBanner').classList.add('hidden');
     document.getElementById('improveResultSection').classList.add('hidden');
     const loadingEl = document.getElementById('improveLoadingState');
-    loadingEl.classList.remove('hidden');
+    if (loadingEl) loadingEl.classList.remove('hidden');
 
     const btnSubmit = document.getElementById('btnSubmitImprove');
-    btnSubmit.disabled = true;
-    document.getElementById('btnSubmitImproveText').innerText = 'Đang xử lý...';
+    if (btnSubmit) {
+        btnSubmit.disabled = true;
+        const btnText = document.getElementById('btnSubmitImproveText');
+        if (btnText) btnText.innerText = 'Đang xử lý ngầm...';
+    }
 
-    // Start timer
+    // Start timer in modal
     improveTimerSeconds = 0;
     const timerText = document.getElementById('improveLoadingTimer');
     if (timerText) {
@@ -3644,133 +4602,198 @@ async function submitImprovePrompt() {
         }
     }, 1000);
 
-    try {
-        const res = await fetch(`/api/prompts/${currentPromptId}/improve`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                instruction: instruction,
-                provider: currentImproveProvider
-            })
-        });
+    enqueueAiTask(targetPromptId, 'improve_prompt', targetTitle, async () => {
+        try {
+            const res = await fetch(`/api/prompts/${targetPromptId}/improve`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    instruction: instruction,
+                    provider: currentImproveProvider,
+                    auto_save: true
+                })
+            });
 
-        if (!res.ok) {
-            const errData = await res.json().catch(() => ({}));
-            throw new Error(errData.detail || `Lỗi máy chủ (${res.status})`);
-        }
+            if (!res.ok) {
+                const errData = await res.json().catch(() => ({}));
+                throw new Error(errData.detail || `Lỗi máy chủ (${res.status})`);
+            }
 
-        const data = await res.json();
-        currentImproveResult = data;
+            const data = await res.json();
+            const savedPrompt = data.saved_prompt;
 
-        // Render Explanation (Giải thích những chỗ sửa)
-        const expEl = document.getElementById('improveExplanationText');
-        if (expEl) {
-            expEl.innerText = data.explanation || 'Đã tối ưu hóa và tích hợp đầy đủ các yêu cầu bổ sung vào prompt.';
-        }
+            // 1. Update in local currentPromptsList
+            const found = currentPromptsList.find(p => p.id === targetPromptId);
+            if (found) {
+                found.title = data.title;
+                found.prompt_type = data.prompt_type;
+                found.parsed_json = data.parsed_json;
+                found.fields = data.fields;
+            }
 
-        // Render Changes List
-        const changesListEl = document.getElementById('improveChangesList');
-        if (changesListEl) {
-            const changes = data.changes || [];
-            if (changes.length > 0) {
-                changesListEl.innerHTML = `
-                    <div class="grid grid-cols-1 md:grid-cols-2 gap-2.5">
-                        ${changes.map(ch => `
-                            <div class="p-2.5 rounded-lg bg-dark-900 border border-dark-700/80 space-y-1">
-                                <div class="flex items-center justify-between">
-                                    <span class="text-[11px] font-semibold text-emerald-400 flex items-center gap-1">
-                                        <i class="fa-solid fa-arrow-trend-up text-[10px]"></i>
-                                        ${escapeHtml(ch.area || 'Điểm nâng cấp')}
+            // 2. Update sidebar card
+            const card = document.getElementById(`prompt-card-${targetPromptId}`);
+            if (card) {
+                const cardTitle = card.querySelector('h4');
+                if (cardTitle) {
+                    cardTitle.innerText = data.title;
+                }
+                const cardBadge = card.querySelector('span:last-child');
+                if (cardBadge) {
+                    const isJson = data.prompt_type === 'json' || data.parsed_json;
+                    cardBadge.innerText = isJson ? 'JSON' : 'TEXT';
+                    cardBadge.className = `text-[10px] px-1.5 py-0.5 rounded font-medium ${isJson ? 'bg-indigo-500/10 text-indigo-400 border border-indigo-500/20' : 'bg-slate-700/50 text-slate-300'}`;
+                }
+            }
+
+            // 3. If user is currently looking at this prompt, update detail view
+            if (currentPromptId === targetPromptId) {
+                if (savedPrompt) {
+                    currentPromptDetail = savedPrompt;
+                } else if (currentPromptDetail) {
+                    currentPromptDetail.title = data.title;
+                    currentPromptDetail.prompt_code = data.prompt_code;
+                    currentPromptDetail.raw_content = data.prompt_code;
+                    currentPromptDetail.prompt_type = data.prompt_type;
+                    currentPromptDetail.parsed_json = data.parsed_json;
+                    currentPromptDetail.fields = data.fields;
+                }
+                renderDetail(currentPromptDetail);
+            }
+
+            // 4. If modal is still open and for this prompt, render modal details
+            const modal = document.getElementById('improvePromptModal');
+            const isModalOpen = modal && !modal.classList.contains('hidden');
+            if (isModalOpen && currentPromptId === targetPromptId) {
+                currentImproveResult = data;
+
+                // Render Explanation
+                const expEl = document.getElementById('improveExplanationText');
+                if (expEl) {
+                    expEl.innerText = data.explanation || 'Đã tối ưu hóa và tích hợp đầy đủ các yêu cầu bổ sung vào prompt.';
+                }
+
+                // Render Changes List
+                const changesListEl = document.getElementById('improveChangesList');
+                if (changesListEl) {
+                    const changes = data.changes || [];
+                    if (changes.length > 0) {
+                        changesListEl.innerHTML = `
+                            <div class="grid grid-cols-1 md:grid-cols-2 gap-2.5">
+                                ${changes.map(ch => `
+                                    <div class="p-2.5 rounded-lg bg-dark-900 border border-dark-700/80 space-y-1">
+                                        <div class="flex items-center justify-between">
+                                            <span class="text-[11px] font-semibold text-emerald-400 flex items-center gap-1">
+                                                <i class="fa-solid fa-arrow-trend-up text-[10px]"></i>
+                                                ${escapeHtml(ch.area || 'Điểm nâng cấp')}
+                                            </span>
+                                        </div>
+                                        ${ch.before ? `<p class="text-[11px] text-slate-500 line-through"><span class="text-slate-600">Trước:</span> ${escapeHtml(ch.before)}</p>` : ''}
+                                        <p class="text-[11px] text-slate-200"><span class="text-emerald-400/90 font-medium">Sau:</span> ${escapeHtml(ch.after || '')}</p>
+                                        ${ch.reason ? `<p class="text-[10px] text-slate-400 italic"><span class="text-slate-500">Lý do:</span> ${escapeHtml(ch.reason)}</p>` : ''}
+                                    </div>
+                                `).join('')}
+                            </div>
+                        `;
+                    } else {
+                        changesListEl.innerHTML = '';
+                    }
+                }
+
+                // Render Improved Prompt Code Display
+                const codeDisplay = document.getElementById('improvePromptCodeDisplay');
+                if (codeDisplay) {
+                    codeDisplay.innerText = data.prompt_code || '';
+                }
+                const charBadge = document.getElementById('improveCharCountBadge');
+                if (charBadge) {
+                    charBadge.innerText = `${(data.prompt_code || '').length} chars`;
+                }
+
+                const typeBadge = document.getElementById('improveResultTypeBadge');
+                if (typeBadge) {
+                    typeBadge.innerText = (data.prompt_type || 'JSON').toUpperCase();
+                }
+
+                // Render Dynamic Form Fields Table/Grid
+                const fields = data.fields || [];
+                const countBadge = document.getElementById('improveDynamicFieldsCount');
+                if (countBadge) {
+                    countBadge.innerText = `${fields.length} trường`;
+                }
+
+                const fieldsContainer = document.getElementById('improveDynamicFieldsContainer');
+                if (fieldsContainer) {
+                    if (fields.length > 0) {
+                        fieldsContainer.innerHTML = fields.map((f, idx) => `
+                            <div class="flex flex-col sm:flex-row sm:items-center justify-between p-2.5 rounded-lg bg-dark-850 border border-dark-750 gap-2">
+                                <div class="flex items-center gap-2 min-w-0 sm:w-1/3">
+                                    <span class="w-5 h-5 rounded bg-dark-900 text-slate-400 text-[10px] font-mono flex items-center justify-center flex-shrink-0 border border-dark-700">
+                                        ${idx + 1}
                                     </span>
+                                    <div class="min-w-0">
+                                        <div class="text-xs font-semibold text-slate-200 truncate">${escapeHtml(f.label || f.key)}</div>
+                                        <div class="text-[10px] font-mono text-slate-500 truncate">${escapeHtml(f.path)}</div>
+                                    </div>
                                 </div>
-                                ${ch.before ? `<p class="text-[11px] text-slate-500 line-through"><span class="text-slate-600">Trước:</span> ${escapeHtml(ch.before)}</p>` : ''}
-                                <p class="text-[11px] text-slate-200"><span class="text-emerald-400/90 font-medium">Sau:</span> ${escapeHtml(ch.after || '')}</p>
-                                ${ch.reason ? `<p class="text-[10px] text-slate-400 italic"><span class="text-slate-500">Lý do:</span> ${escapeHtml(ch.reason)}</p>` : ''}
+                                <div class="sm:w-2/3">
+                                    <input type="text" value="${escapeHtml(f.value || '')}"
+                                           onchange="onImproveFieldEdit('${escapeHtml(f.path)}', this.value)"
+                                           class="w-full px-2.5 py-1.5 bg-dark-900 text-slate-100 text-xs font-mono rounded border border-dark-700 focus:outline-none focus:border-emerald-500 transition">
+                                </div>
                             </div>
-                        `).join('')}
-                    </div>
-                `;
+                        `).join('');
+                    } else {
+                        fieldsContainer.innerHTML = `
+                            <div class="p-4 text-center text-slate-500 text-xs">
+                                Không có trường tham số động riêng lẻ nào.
+                            </div>
+                        `;
+                    }
+                }
+
+                // Enable Save Buttons
+                const btnOverwrite = document.getElementById('btnImproveOverwrite');
+                const btnNewVersion = document.getElementById('btnImproveNewVersion');
+                if (btnOverwrite) btnOverwrite.disabled = false;
+                if (btnNewVersion) btnNewVersion.disabled = false;
+
+                // Reveal Result Section
+                const resultSection = document.getElementById('improveResultSection');
+                if (resultSection) {
+                    resultSection.classList.remove('hidden');
+                    resultSection.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+                }
+
+                showToast(`✓ Đã cải tiến xong "${targetTitle}" và tự động lưu vào dữ liệu!`);
             } else {
-                changesListEl.innerHTML = '';
+                showToast(`✓ Đã cải tiến xong "${targetTitle}" và tự động lưu vào dữ liệu!`);
+            }
+
+        } catch (err) {
+            console.error('Improve error:', err);
+            const modal = document.getElementById('improvePromptModal');
+            const isModalOpen = modal && !modal.classList.contains('hidden');
+            if (isModalOpen && currentPromptId === targetPromptId) {
+                showImproveError(`Lỗi: ${err.message}`);
+            } else {
+                showToast(`Lỗi khi cải tiến "${targetTitle}": ${err.message}`);
+            }
+        } finally {
+            if (improveTimerInterval) {
+                clearInterval(improveTimerInterval);
+                improveTimerInterval = null;
+            }
+            const loadingEl = document.getElementById('improveLoadingState');
+            if (loadingEl) loadingEl.classList.add('hidden');
+            const btnSubmit = document.getElementById('btnSubmitImprove');
+            if (btnSubmit) {
+                btnSubmit.disabled = false;
+                const btnText = document.getElementById('btnSubmitImproveText');
+                if (btnText) btnText.innerText = 'Gửi AI cải tiến lại';
             }
         }
-
-        // Render Improved Prompt Code Display
-        const codeDisplay = document.getElementById('improvePromptCodeDisplay');
-        if (codeDisplay) {
-            codeDisplay.innerText = data.prompt_code || '';
-        }
-        const charBadge = document.getElementById('improveCharCountBadge');
-        if (charBadge) {
-            charBadge.innerText = `${(data.prompt_code || '').length} chars`;
-        }
-
-        const typeBadge = document.getElementById('improveResultTypeBadge');
-        if (typeBadge) {
-            typeBadge.innerText = (data.prompt_type || 'JSON').toUpperCase();
-        }
-
-        // Render Dynamic Form Fields Table/Grid
-        const fields = data.fields || [];
-        const countBadge = document.getElementById('improveDynamicFieldsCount');
-        if (countBadge) {
-            countBadge.innerText = `${fields.length} trường`;
-        }
-
-        const fieldsContainer = document.getElementById('improveDynamicFieldsContainer');
-        if (fieldsContainer) {
-            if (fields.length > 0) {
-                fieldsContainer.innerHTML = fields.map((f, idx) => `
-                    <div class="flex flex-col sm:flex-row sm:items-center justify-between p-2.5 rounded-lg bg-dark-850 border border-dark-750 gap-2">
-                        <div class="flex items-center gap-2 min-w-0 sm:w-1/3">
-                            <span class="w-5 h-5 rounded bg-dark-900 text-slate-400 text-[10px] font-mono flex items-center justify-center flex-shrink-0 border border-dark-700">
-                                ${idx + 1}
-                            </span>
-                            <div class="min-w-0">
-                                <div class="text-xs font-semibold text-slate-200 truncate">${escapeHtml(f.label || f.key)}</div>
-                                <div class="text-[10px] font-mono text-slate-500 truncate">${escapeHtml(f.path)}</div>
-                            </div>
-                        </div>
-                        <div class="sm:w-2/3">
-                            <input type="text" value="${escapeHtml(f.value || '')}"
-                                   onchange="onImproveFieldEdit('${escapeHtml(f.path)}', this.value)"
-                                   class="w-full px-2.5 py-1.5 bg-dark-900 text-slate-100 text-xs font-mono rounded border border-dark-700 focus:outline-none focus:border-emerald-500 transition">
-                        </div>
-                    </div>
-                `).join('');
-            } else {
-                fieldsContainer.innerHTML = `
-                    <div class="p-4 text-center text-slate-500 text-xs">
-                        Không có trường tham số động riêng lẻ nào.
-                    </div>
-                `;
-            }
-        }
-
-        // Enable Save Buttons
-        const btnOverwrite = document.getElementById('btnImproveOverwrite');
-        const btnNewVersion = document.getElementById('btnImproveNewVersion');
-        if (btnOverwrite) btnOverwrite.disabled = false;
-        if (btnNewVersion) btnNewVersion.disabled = false;
-
-        // Reveal Result Section
-        document.getElementById('improveResultSection').classList.remove('hidden');
-        document.getElementById('improveResultSection').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-
-        showToast('AI đã hoàn tất việc cải tiến câu lệnh!');
-
-    } catch (err) {
-        console.error('Improve error:', err);
-        showImproveError(`Lỗi: ${err.message}`);
-    } finally {
-        if (improveTimerInterval) {
-            clearInterval(improveTimerInterval);
-            improveTimerInterval = null;
-        }
-        loadingEl.classList.add('hidden');
-        btnSubmit.disabled = false;
-        document.getElementById('btnSubmitImproveText').innerText = 'Gửi AI cải tiến lại';
-    }
+    });
 }
 
 function onImproveFieldEdit(path, newValue) {
@@ -3820,6 +4843,7 @@ async function saveImproveOverwrite() {
     btn.innerHTML = '<i class="fa-solid fa-circle-notch fa-spin"></i><span>Đang lưu đè...</span>';
 
     try {
+        const origRaw = (currentPromptDetail && (currentPromptDetail.original_raw_content || currentPromptDetail.raw_content || currentPromptDetail.prompt_code)) || '';
         const res = await fetch(`/api/prompts/${currentPromptId}/save-improved`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -3827,7 +4851,7 @@ async function saveImproveOverwrite() {
                 mode: 'overwrite',
                 title: currentImproveResult.title,
                 prompt_code: currentImproveResult.prompt_code,
-                raw_content: currentImproveResult.prompt_code,
+                raw_content: origRaw,
                 prompt_type: currentImproveResult.prompt_type,
                 parsed_json: currentImproveResult.parsed_json,
                 fields: currentImproveResult.fields
@@ -3848,6 +4872,8 @@ async function saveImproveOverwrite() {
             found.title = currentPromptDetail.title;
             found.prompt_type = currentPromptDetail.prompt_type;
             found.parsed_json = currentPromptDetail.parsed_json;
+            found.raw_content = currentPromptDetail.raw_content;
+            found.original_raw_content = currentPromptDetail.original_raw_content;
         }
 
         // Update card in sidebar
@@ -3866,7 +4892,7 @@ async function saveImproveOverwrite() {
         renderDetail(currentPromptDetail);
 
         closeImproveModal();
-        showToast('Đã lưu đè thành công câu lệnh với nội dung cải tiến!');
+        showToast('Đã lưu đè thành công câu lệnh (văn bản gốc được bảo toàn)!');
 
     } catch (err) {
         console.error('Save overwrite error:', err);
@@ -3885,6 +4911,7 @@ async function saveImproveNewVersion() {
     btn.innerHTML = '<i class="fa-solid fa-circle-notch fa-spin"></i><span>Đang tạo phiên bản mới...</span>';
 
     try {
+        const origRaw = (currentPromptDetail && (currentPromptDetail.original_raw_content || currentPromptDetail.raw_content || currentPromptDetail.prompt_code)) || '';
         const res = await fetch(`/api/prompts/${currentPromptId}/save-improved`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -3892,7 +4919,7 @@ async function saveImproveNewVersion() {
                 mode: 'new_version',
                 title: currentImproveResult.title,
                 prompt_code: currentImproveResult.prompt_code,
-                raw_content: currentImproveResult.prompt_code,
+                raw_content: origRaw,
                 prompt_type: currentImproveResult.prompt_type,
                 parsed_json: currentImproveResult.parsed_json,
                 fields: currentImproveResult.fields

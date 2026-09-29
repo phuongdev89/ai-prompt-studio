@@ -67,6 +67,20 @@ def ensure_database():
             cursor.execute("ALTER TABLE prompts ADD COLUMN requires_reference INTEGER DEFAULT 0")
             # Mark all existing image prompts as requiring reference image as requested
             cursor.execute("UPDATE prompts SET requires_reference = 1 WHERE category = 'image'")
+        if "compact_prompt" not in prompt_cols:
+            print("[*] Adding compact_prompt column to prompts table...")
+            cursor.execute("ALTER TABLE prompts ADD COLUMN compact_prompt TEXT DEFAULT ''")
+        if "original_raw_content" not in prompt_cols:
+            print("[*] Adding original_raw_content column to prompts table...")
+            cursor.execute("ALTER TABLE prompts ADD COLUMN original_raw_content TEXT DEFAULT ''")
+            cursor.execute("""
+                UPDATE prompts 
+                SET original_raw_content = CASE 
+                    WHEN raw_content IS NOT NULL AND raw_content != '' THEN raw_content 
+                    ELSE prompt_code 
+                END 
+                WHERE original_raw_content IS NULL OR original_raw_content = ''
+            """)
 
         # Migration: convert legacy 'character' category to 'image'
         cursor.execute("UPDATE prompts SET category = 'image' WHERE category = 'character' OR category IS NULL OR category = ''")
@@ -159,6 +173,35 @@ def ensure_database():
         if content_count == 0:
             print("[*] Seeding starter Content prompts for the Content tab...")
             _seed_starter_content_prompts(cursor)
+
+        # 10. Check if video prompts migration is needed
+        cursor.execute("SELECT COUNT(*) as count FROM prompts WHERE category = 'video'")
+        video_count = cursor.fetchone().get("count", 0)
+        if video_count == 0:
+            cursor.execute("""
+                UPDATE prompts
+                SET category = 'video'
+                WHERE (
+                    LOWER(title) LIKE '%video%'
+                    OR LOWER(title) LIKE '%seedance%'
+                    OR LOWER(title) LIKE '%veo 3%'
+                    OR LOWER(title) LIKE '%veo3%'
+                    OR LOWER(title) LIKE '%sora%'
+                    OR LOWER(title) LIKE '%kling%'
+                    OR LOWER(title) LIKE '%heygen%'
+                    OR LOWER(title) LIKE '%runway%'
+                    OR LOWER(title) LIKE '%luma%'
+                    OR LOWER(title) LIKE '%hailuo%'
+                    OR LOWER(title) LIKE '%pika%'
+                    OR (LOWER(title) LIKE '%kịch bản%' AND (LOWER(title) LIKE '%tiktok%' OR LOWER(title) LIKE '%youtube%' OR LOWER(title) LIKE '%koc%' OR LOWER(title) LIKE '%reels%' OR LOWER(title) LIKE '%review%' OR LOWER(title) LIKE '%trước-sau%' OR LOWER(title) LIKE '%aida%' OR LOWER(title) LIKE '%lý do nên mua%' OR LOWER(title) LIKE '%vlog%'))
+                    OR LOWER(title) LIKE '%script voiceover%'
+                    OR LOWER(title) LIKE '%qa chấm điểm script%'
+                    OR LOWER(note) LIKE '%tạo video ai%'
+                    OR LOWER(note) LIKE '%video quảng cáo%'
+                )
+                AND NOT (LOWER(title) LIKE '%thumbnail%' OR LOWER(title) LIKE '%ảnh cover%' OR LOWER(title) LIKE '%ảnh bìa%')
+                AND NOT (LOWER(title) LIKE '%facebook%' AND LOWER(title) NOT LIKE '%video%')
+            """)
 
         conn.commit()
 

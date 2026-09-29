@@ -4,6 +4,7 @@ import base64
 import mimetypes
 import urllib.request
 import uuid
+from pathlib import Path
 from typing import Optional
 from urllib.parse import quote
 
@@ -22,6 +23,7 @@ def is_configured(cfg: Optional[dict] = None) -> bool:
 
 
 def _read_image(source: str, timeout: int = 30):
+    source = (source or "").strip()
     if source.startswith("data:image/"):
         header, encoded = source.split(",", 1)
         mime = header.split(";", 1)[0][5:] or "png"
@@ -31,7 +33,15 @@ def _read_image(source: str, timeout: int = 30):
         with urllib.request.urlopen(request, timeout=timeout) as response:
             content_type = response.headers.get_content_type() or "image/png"
             return response.read(), content_type
-    raise ValueError("Ảnh tham chiếu phải là data URI hoặc URL HTTP(S)")
+    try:
+        p = Path(source)
+        if p.is_file():
+            mime, _ = mimetypes.guess_type(str(p))
+            mime = mime or "image/png"
+            return p.read_bytes(), mime
+    except Exception:
+        pass
+    raise ValueError("Ảnh tham chiếu phải là data URI, URL HTTP(S) hoặc đường dẫn tệp tin hợp lệ")
 
 
 def upload_reference_image(source: str, cfg: Optional[dict] = None) -> str:

@@ -49,3 +49,4 @@ data/images/*
 # Agents
 .agents/
 .claude
+scratch

@@ -95,12 +95,17 @@
             </div>
         </div>
 
-        <!-- Navigation Tabs: Image vs Content -->
+        <!-- Navigation Tabs: Image vs Video vs Content -->
         <div class="flex items-center bg-dark-900/90 p-1 rounded-xl border border-dark-700 shadow-inner">
             <button id="navTabImage" onclick="switchNavTab('image')"
                     class="px-3.5 py-1.5 rounded-lg text-xs font-semibold transition-all duration-200 flex items-center gap-2 bg-gradient-to-r from-brand-600 to-emerald-600 text-white shadow-md shadow-brand-600/20">
                 <i class="fa-solid fa-wand-magic-sparkles text-amber-300 text-xs"></i>
                 <span>Image</span>
+            </button>
+            <button id="navTabVideo" onclick="switchNavTab('video')"
+                    class="px-3.5 py-1.5 rounded-lg text-xs font-medium transition-all duration-200 flex items-center gap-2 text-slate-400 hover:text-white hover:bg-dark-750">
+                <i class="fa-solid fa-video text-rose-400 text-xs"></i>
+                <span>Video</span>
             </button>
             <button id="navTabContent" onclick="switchNavTab('content')"
                     class="px-3.5 py-1.5 rounded-lg text-xs font-medium transition-all duration-200 flex items-center gap-2 text-slate-400 hover:text-white hover:bg-dark-750">
@@ -109,7 +114,22 @@
             </button>
         </div>
 
-        <div class="flex items-center space-x-3">
+        <div class="flex items-center space-x-2 sm:space-x-3">
+            <!-- Global Background Tasks Badge (Visible when tasks are running) -->
+            <span id="globalBgTaskBadge" class="hidden items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-purple-500/10 text-purple-300 border border-purple-500/30 animate-pulse">
+                <i class="fa-solid fa-circle-notch fa-spin text-[10px]"></i>
+                <span id="globalBgTaskText">1 tác vụ ngầm</span>
+            </span>
+
+            <!-- AI Connection Status Badge -->
+            <button type="button" id="aiConnectionStatusBtn" onclick="pingAiConnection(true)"
+                    class="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium bg-dark-700/80 hover:bg-dark-700 text-slate-300 border border-dark-600 transition shadow-sm active:scale-95 cursor-pointer"
+                    title="Đang kiểm tra kết nối AI... Nhấp để kiểm tra lại">
+                <span id="aiStatusDot" class="w-2 h-2 rounded-full bg-amber-400 animate-pulse"></span>
+                <i class="fa-solid fa-brain text-[11px] text-indigo-400" id="aiStatusIcon"></i>
+                <span id="aiStatusText">AI: Đang kiểm tra...</span>
+            </button>
+
             <!-- Sync / Update Button -->
             <button onclick="openSyncModal()" class="px-3 py-1.5 rounded-lg text-xs font-medium text-slate-400 hover:text-white hover:bg-dark-700 transition flex items-center gap-1.5" title="Kiểm tra cập nhật">
                 <i class="fa-solid fa-arrows-rotate text-xs"></i>
@@ -499,10 +519,13 @@
                         </span>
                     </div>
 
-                    <!-- Code Mode Tabs: Live Prompt vs Raw Original -->
+                    <!-- Code Mode Tabs: Live Prompt vs Raw Original vs Compact 1000 Chars -->
                     <div class="flex bg-dark-900 p-1 rounded-lg border border-dark-700 text-xs">
                         <button onclick="setCodeViewMode('live')" id="btnViewLive" class="px-3 py-1 rounded-md bg-dark-700 text-white font-medium transition">
                             Prompt tùy biến
+                        </button>
+                        <button onclick="setCodeViewMode('compact')" id="btnViewCompact" class="px-3 py-1 rounded-md text-slate-400 hover:text-white transition flex items-center gap-1.5" title="Phiên bản tối giản cô đọng dưới 1000 ký tự">
+                            <span>Prompt tối giản 1000 ký tự</span>
                         </button>
                         <button onclick="setCodeViewMode('raw')" id="btnViewRaw" class="px-3 py-1 rounded-md text-slate-400 hover:text-white transition">
                             Văn bản gốc (Raw)
@@ -511,6 +534,10 @@
 
                     <div class="flex items-center gap-2.5">
                         <span id="charCountBadge" class="text-xs text-slate-400 font-mono px-2 py-1 rounded bg-dark-900 border border-dark-700">0 chars</span>
+                        <button id="btnRegenCompact" onclick="regenerateCompactPrompt()" class="hidden px-2.5 py-1.5 rounded-lg bg-dark-800 hover:bg-dark-700 text-amber-300 border border-dark-600 font-semibold text-xs transition active:scale-95 flex items-center gap-1.5" title="Tạo lại prompt tối giản bằng AI">
+                            <i class="fa-solid fa-arrows-rotate text-[11px]"></i>
+                            <span>Tạo lại</span>
+                        </button>
                         <button onclick="copyCurrentPrompt()" class="px-3.5 py-1.5 rounded-lg bg-brand-600 hover:bg-brand-500 text-white font-semibold text-xs shadow-md shadow-brand-600/20 flex items-center gap-1.5 transition active:scale-95">
                             <i class="fa-solid fa-copy"></i>
                             <span>Chép lệnh</span>
@@ -889,12 +916,18 @@
 
             <!-- Modal Footer (with 3 requested buttons: Lưu đè, Lưu thành phiên bản mới, Đóng) -->
             <div class="px-6 py-4 border-t border-dark-700 bg-dark-850 flex items-center justify-between gap-3 flex-shrink-0 flex-wrap">
-                <!-- Close button -->
-                <button type="button" onclick="closeImproveModal()"
-                        class="px-4 py-2.5 rounded-xl bg-dark-700 hover:bg-dark-600 text-slate-300 hover:text-white text-xs font-medium transition">
-                    <i class="fa-solid fa-xmark mr-1.5"></i>
-                    <span>Đóng</span>
-                </button>
+                <!-- Close button & Original text guarantee -->
+                <div class="flex items-center gap-3 flex-wrap">
+                    <button type="button" onclick="closeImproveModal()"
+                            class="px-4 py-2.5 rounded-xl bg-dark-700 hover:bg-dark-600 text-slate-300 hover:text-white text-xs font-medium transition">
+                        <i class="fa-solid fa-xmark mr-1.5"></i>
+                        <span>Đóng</span>
+                    </button>
+                    <span class="text-[11px] text-slate-400 flex items-center gap-1.5">
+                        <i class="fa-solid fa-shield-check text-emerald-400"></i>
+                        <span>Văn bản gốc luôn được bảo lưu 100%</span>
+                    </span>
+                </div>
 
                 <!-- Action Buttons: Lưu đè & Lưu thành phiên bản mới -->
                 <div class="flex items-center gap-2.5 flex-wrap">
@@ -1081,7 +1114,7 @@
     <!-- Generate Image Modal (Tạo ảnh với AI) -->
     <div id="generateImageModal" class="fixed inset-0 z-50 bg-black/80 backdrop-blur-md hidden flex items-center justify-center p-3 sm:p-4 overflow-y-auto">
 
-        <div class="bg-dark-800 border border-dark-700 rounded-2xl w-full max-w-3xl my-auto overflow-hidden shadow-2xl animate-fade-in flex flex-col max-h-[92vh]">
+        <div class="bg-dark-800 border border-dark-700 rounded-2xl w-full max-w-4xl xl:max-w-5xl my-auto overflow-hidden shadow-2xl animate-fade-in flex flex-col max-h-[92vh]">
             <!-- Modal Header -->
             <div class="px-6 py-4 border-b border-dark-700 flex items-center justify-between bg-dark-850 flex-shrink-0">
                 <div class="flex items-center space-x-3">
@@ -1146,27 +1179,95 @@
                                   placeholder="Nội dung câu lệnh prompt..."></textarea>
                     </div>
 
-                    <!-- Reference Image Upload -->
-                    <div id="genReferenceUploadSection" class="hidden space-y-1.5">
-                        <label for="genRefImageUpload" class="text-xs font-semibold text-slate-200 flex items-center gap-1.5">
-                            <i class="fa-solid fa-image text-purple-400 text-xs"></i>
-                            <span>Ảnh tham chiếu (tùy chọn)</span>
-                            <span class="text-[10px] text-purple-400 font-mono px-1.5 py-0.5 rounded bg-purple-500/10 border border-purple-500/20">Reference Image</span>
-                        </label>
-                        <div class="relative">
-                            <input type="file" id="genRefImageUpload" accept="image/*" class="hidden" onchange="handleGenRefImageUpload(event)">
-                            <button type="button" onclick="document.getElementById('genRefImageUpload').click()" class="w-full px-3.5 py-2.5 bg-dark-900 text-slate-400 text-xs rounded-xl border border-dark-700 hover:border-purple-500 focus:outline-none focus:border-purple-500 transition flex items-center justify-center gap-2">
-                                <i class="fa-solid fa-upload"></i>
-                                <span id="genRefImageLabel">Tải ảnh tham chiếu lên</span>
-                            </button>
-                            <div id="genRefImagePreview" class="hidden mt-2 relative rounded-xl overflow-hidden border border-dark-700 bg-dark-950 min-h-[260px] flex items-center justify-center p-2">
-                                <img id="genRefImagePreviewImg" class="max-w-full max-h-[360px] w-full h-full object-contain cursor-pointer rounded-lg" onclick="openLightbox(this.src)">
-                                <button type="button" onclick="clearGenRefImage()" class="absolute top-2 right-2 w-7 h-7 rounded-full bg-red-500/90 hover:bg-red-600 text-white flex items-center justify-center transition shadow-lg">
-                                    <i class="fa-solid fa-times text-xs"></i>
+                    <!-- Reference Image Section (Upload hoặc Chọn từ KOC) -->
+                    <div id="genReferenceUploadSection" class="hidden space-y-2">
+                        <div class="flex items-center justify-between">
+                            <label class="text-xs font-semibold text-slate-200 flex items-center gap-1.5">
+                                <i class="fa-solid fa-image text-purple-400 text-xs"></i>
+                                <span>Ảnh tham chiếu (tùy chọn)</span>
+                                <span class="text-[10px] text-purple-400 font-mono px-1.5 py-0.5 rounded bg-purple-500/10 border border-purple-500/20">Reference Image</span>
+                            </label>
+                            
+                            <!-- Source Switcher Tabs -->
+                            <div class="inline-flex p-0.5 bg-dark-900 rounded-lg border border-dark-700 text-[11px]">
+                                <button type="button" id="btnRefTabKoc" onclick="switchRefTab('koc')"
+                                        class="px-2.5 py-1 rounded-md font-medium transition flex items-center gap-1.5 bg-purple-600 text-white shadow">
+                                    <i class="fa-solid fa-user-astronaut text-[11px]"></i>
+                                    <span>Chọn từ KOC</span>
+                                </button>
+                                <button type="button" id="btnRefTabUpload" onclick="switchRefTab('upload')"
+                                        class="px-2.5 py-1 rounded-md font-medium text-slate-400 hover:text-white transition flex items-center gap-1.5">
+                                    <i class="fa-solid fa-cloud-arrow-up text-[11px]"></i>
+                                    <span>Tải ảnh lên</span>
                                 </button>
                             </div>
                         </div>
-                        <p class="text-[11px] text-slate-400">Ảnh sẽ được tải lên S3 và gửi kèm với câu lệnh khi cấu hình bật hỗ trợ ảnh tham chiếu.</p>
+
+                        <!-- Tab 1: KOC Selection Panel -->
+                        <div id="refTabKocContent" class="space-y-2">
+                            <!-- KOC Dropdown + Refresh -->
+                            <div class="flex items-center gap-2">
+                                <div class="relative flex-1">
+                                    <select id="genKocSelect" onchange="onKocSelectChange()"
+                                            class="w-full px-3 py-2 bg-dark-900 text-slate-200 text-xs rounded-xl border border-dark-700 focus:outline-none focus:border-purple-500 transition cursor-pointer">
+                                        <option value="">-- Đang nạp danh sách KOC... --</option>
+                                    </select>
+                                </div>
+                                <button type="button" onclick="loadKocList(true)" id="btnRefreshKoc"
+                                        class="p-2 rounded-xl bg-dark-900 hover:bg-dark-800 text-slate-400 hover:text-purple-400 border border-dark-700 transition flex items-center justify-center"
+                                        title="Quét lại danh sách KOC từ ổ đĩa">
+                                    <i class="fa-solid fa-rotate text-xs" id="kocRefreshIcon"></i>
+                                </button>
+                            </div>
+
+                            <!-- KOC Image Gallery Grid -->
+                            <div id="kocGalleryContainer" class="hidden space-y-1.5">
+                                <div class="flex items-center justify-between text-[11px]">
+                                    <span class="text-slate-400">
+                                        Chọn ảnh của <strong id="kocSelectedNameText" class="text-purple-300"></strong>:
+                                    </span>
+                                    <span id="kocSelectedCountBadge" class="text-[10px] font-mono px-1.5 py-0.5 rounded bg-dark-800 text-slate-400 border border-dark-700">0 ảnh</span>
+                                </div>
+                                <div id="kocImagesList" class="grid grid-cols-3 sm:grid-cols-4 gap-2 max-h-[190px] overflow-y-auto p-2 bg-dark-950/90 rounded-xl border border-dark-700">
+                                    <!-- Dynamic KOC image cards -->
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Tab 2: Upload File Panel -->
+                        <div id="refTabUploadContent" class="hidden space-y-2">
+                            <input type="file" id="genRefImageUpload" accept="image/*" class="hidden" onchange="handleGenRefImageUpload(event)">
+                            <button type="button" onclick="document.getElementById('genRefImageUpload').click()"
+                                    class="w-full px-3.5 py-3 bg-dark-900 hover:bg-dark-850 text-slate-400 hover:text-purple-300 text-xs rounded-xl border border-dashed border-dark-700 hover:border-purple-500/70 focus:outline-none transition flex flex-col items-center justify-center gap-1.5 group">
+                                <i class="fa-solid fa-cloud-arrow-up text-lg text-slate-500 group-hover:text-purple-400 transition"></i>
+                                <span id="genRefImageLabel">Chọn tệp ảnh từ máy tính (PNG, JPG, WEBP)</span>
+                                <span class="text-[10px] text-slate-500">Tối đa 15MB • Tự động upload lên S3 khi tạo ảnh</span>
+                            </button>
+                        </div>
+
+                        <!-- Selected Reference Image Preview (Shared) -->
+                        <div id="genRefImagePreview" class="hidden mt-2 p-2.5 rounded-xl border border-purple-500/40 bg-dark-950/90 space-y-2">
+                            <div class="flex items-center justify-between">
+                                <div class="flex items-center gap-1.5 min-w-0">
+                                    <span class="w-1.5 h-1.5 rounded-full bg-emerald-400"></span>
+                                    <span id="genRefSourceBadge" class="text-[10px] font-medium font-mono px-2 py-0.5 rounded bg-purple-500/20 text-purple-300 border border-purple-500/30 truncate max-w-[200px]">Đã chọn ảnh</span>
+                                </div>
+                                <button type="button" onclick="clearGenRefImage()"
+                                        class="text-[11px] text-rose-400 hover:text-rose-300 flex items-center gap-1 transition px-2 py-0.5 rounded hover:bg-rose-500/10">
+                                    <i class="fa-solid fa-times"></i>
+                                    <span>Bỏ chọn ảnh</span>
+                                </button>
+                            </div>
+                            <div class="relative rounded-lg overflow-hidden border border-dark-700 bg-dark-900 max-h-[200px] flex items-center justify-center p-1.5">
+                                <img id="genRefImagePreviewImg" class="max-h-[190px] w-auto max-w-full object-contain cursor-pointer rounded" onclick="openLightbox(this.src)" title="Nhấp để phóng to / Zoom">
+                            </div>
+                            <div id="genRefImageCaptionBox" class="text-[11px] text-slate-400 line-clamp-2 bg-dark-900/80 p-2 rounded-lg border border-dark-800/80"></div>
+                        </div>
+
+                        <p class="text-[11px] text-slate-400 flex items-center gap-1.5">
+                            <i class="fa-solid fa-shield-halved text-emerald-400 text-xs"></i>
+                            <span>Khi bấm <strong class="text-slate-200">Tạo ảnh ngay</strong>, tệp ảnh sẽ được tự động tải lên S3 và gửi kèm câu lệnh.</span>
+                        </p>
                     </div>
                 </div>
 

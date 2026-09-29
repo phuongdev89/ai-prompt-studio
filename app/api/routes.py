@@ -1,4 +1,5 @@
 from fastapi import APIRouter, HTTPException, Query, Request, Body
+from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 from typing import Optional, List, Dict, Any
 from app.db.repository import PromptRepository
@@ -36,12 +37,14 @@ class UpdatePromptRequest(BaseModel):
     title: Optional[str] = None
     prompt_code: Optional[str] = None
     note: Optional[str] = None
+    category: Optional[str] = None
     requires_reference: Optional[bool] = None
     fields: Optional[List[Dict[str, Any]]] = None
 
 class ImprovePromptRequest(BaseModel):
     instruction: str = Field(..., description="Yêu cầu cải tiến của người dùng")
     provider: Optional[str] = Field(None, description="Nhà cung cấp AI: 'openai'")
+    auto_save: Optional[bool] = Field(True, description="Tự động lưu đè vào bản ghi sau khi cải tiến thành công")
 
 class SaveImprovedPromptRequest(BaseModel):
     mode: str = Field("overwrite", description="Chế độ lưu: 'overwrite' hoặc 'new_version'")
@@ -89,6 +92,10 @@ class AssistantChatRequest(BaseModel):
     history: Optional[List[Dict[str, Any]]] = Field(default_factory=list, description="Lịch sử chat gần nhất")
     category: Optional[str] = Field("all", description="Bộ lọc danh mục: 'all', 'image' hoặc 'content'")
     provider: Optional[str] = Field(None, description="Nhà cung cấp AI: 'openai'")
+
+class CompactPromptRequest(BaseModel):
+    prompt: Optional[str] = Field(None, description="Tùy chọn: câu lệnh tùy biến cần rút gọn")
+    force_refresh: Optional[bool] = Field(False, description="Bắt buộc gọi AI sinh lại kể cả khi đã có trong DB")
 
 @router.get("/prompts")
 @router.get("/prompts/")
@@ -204,11 +211,41 @@ def update_prompt(prompt_id: str, payload: UpdatePromptRequest):
     if payload.note is not None:
         PromptRepository.update_prompt_note(prompt_id=prompt_id, note=payload.note)
         updated = True
+    if payload.category is not None:
+        clean_cat = payload.category.strip().lower()
+        if clean_cat in ("image", "video", "content"):
+            PromptRepository.update_prompt_category(prompt_id=prompt_id, category=clean_cat)
+            updated = True
     if payload.requires_reference is not None:
         PromptRepository.update_prompt_requires_reference(prompt_id=prompt_id, requires_reference=payload.requires_reference)
         updated = True
 
     return {"status": "success", "updated": updated}
+
+@router.post("/prompts/{prompt_id}/category")
+def update_prompt_category_endpoint(prompt_id: str, payload: Dict[str, Any] = Body(default={})):
+    prompt = PromptRepository.get_prompt_by_id(prompt_id)
+    if not prompt:
+        raise HTTPException(status_code=404, detail="Prompt không tồn tại")
+    
+    cat = (payload.get("category") or "").strip().lower()
+    if cat not in ("image", "video", "content"):
+        raise HTTPException(status_code=400, detail="Danh mục không hợp lệ (hỗ trợ: image, video, content)")
+    
+    ok = PromptRepository.update_prompt_category(prompt_id=prompt_id, category=cat)
+    if not ok:
+        raise HTTPException(status_code=500, detail="Không thể cập nhật danh mục")
+    
+    cat_names = {
+        "image": "Hình ảnh",
+        "video": "Video",
+        "content": "Bài viết"
+    }
+    return {
+        "status": "success",
+        "category": cat,
+        "message": f"Đã chuyển danh mục sang '{cat_names.get(cat, cat)}'"
+    }
 
 @router.post("/prompts/{prompt_id}/toggle-reference")
 def toggle_prompt_reference_endpoint(prompt_id: str, payload: Dict[str, Any] = Body(default={})):
@@ -479,6 +516,68 @@ def extract_json_from_image_endpoint(prompt_id: str, payload: ExtractJsonFromIma
         "prompt": created_prompt
     }
 
+@router.post("/prompts/{prompt_id}/compact")
+@router.get("/prompts/{prompt_id}/compact")
+def get_or_generate_compact_prompt_endpoint(
+    prompt_id: str,
+    payload: Optional[CompactPromptRequest] = None
+):
+    from app.services.ai_compact_generator import call_ai_generate_compact_prompt
+
+    prompt = PromptRepository.get_prompt_by_id(prompt_id)
+    if not prompt:
+        raise HTTPException(status_code=404, detail="Prompt không tồn tại")
+
+    force_refresh = payload.force_refresh if payload else False
+    existing_compact = (prompt.get("compact_prompt") or "").strip()
+
+    if existing_compact and not force_refresh:
+        return {
+            "status": "success",
+            "prompt_id": prompt_id,
+            "compact_prompt": existing_compact,
+            "char_count": len(existing_compact),
+            "is_generated": False
+        }
+
+    # Generate via AI
+    source_prompt = (payload.prompt.strip() if (payload and payload.prompt and payload.prompt.strip()) else "")
+    if not source_prompt:
+        source_prompt = prompt.get("prompt_code") or prompt.get("raw_content") or ""
+
+    clean_source = source_prompt.strip()
+    if not clean_source:
+        raise HTTPException(status_code=400, detail="Không có nội dung câu lệnh để rút gọn")
+
+    # Nếu prompt gốc đang < 1000 ký tự thì lấy luôn nó làm prompt tối giản
+    if len(clean_source) < 1000:
+        PromptRepository.update_compact_prompt(prompt_id, clean_source)
+        return {
+            "status": "success",
+            "prompt_id": prompt_id,
+            "compact_prompt": clean_source,
+            "char_count": len(clean_source),
+            "is_generated": False,
+            "message": "Prompt gốc đã dưới 1000 ký tự, sử dụng luôn làm prompt tối giản."
+        }
+
+    category = prompt.get("category") or "image"
+    success, generated_compact, msg = call_ai_generate_compact_prompt(clean_source, category=category)
+    if not success or not generated_compact:
+        raise HTTPException(status_code=500, detail=msg or "Lỗi khi gọi AI sinh prompt tối giản")
+
+    # Save to database
+    PromptRepository.update_compact_prompt(prompt_id, generated_compact)
+
+    return {
+        "status": "success",
+        "prompt_id": prompt_id,
+        "compact_prompt": generated_compact,
+        "char_count": len(generated_compact),
+        "is_generated": True,
+        "message": "Đã tạo và lưu prompt tối giản thành công!"
+    }
+
 @router.post("/prompts/{prompt_id}/improve")
 def improve_prompt_endpoint(prompt_id: str, payload: ImprovePromptRequest):
     from app.services.ai_improver import call_ai_improve_prompt
@@ -505,17 +604,37 @@ def improve_prompt_endpoint(prompt_id: str, payload: ImprovePromptRequest):
     if not success:
         raise HTTPException(status_code=500, detail=msg)
 
+    improved_title = result.get("title") or prompt.get("title") or "Prompt đã cải tiến"
+    improved_code = (result.get("prompt_code") or "").strip()
+    improved_type = result.get("prompt_type", "json")
+    improved_json = result.get("parsed_json")
+    improved_fields = result.get("fields", [])
+
+    saved_prompt = None
+    if payload.auto_save:
+        orig_raw = prompt.get("original_raw_content") or prompt.get("raw_content") or prompt.get("prompt_code") or ""
+        saved_prompt = PromptRepository.overwrite_prompt(
+            prompt_id=prompt_id,
+            title=improved_title,
+            prompt_code=improved_code,
+            raw_content=orig_raw,
+            prompt_type=improved_type,
+            parsed_json=improved_json,
+            fields=improved_fields
+        )
+
     return {
         "status": "success",
         "message": msg,
         "original_prompt_id": prompt_id,
-        "title": result.get("title") or prompt.get("title") or "Prompt đã cải tiến",
-        "prompt_type": result.get("prompt_type", "json"),
-        "prompt_code": result.get("prompt_code", ""),
-        "parsed_json": result.get("parsed_json"),
-        "fields": result.get("fields", []),
+        "title": improved_title,
+        "prompt_type": improved_type,
+        "prompt_code": improved_code,
+        "parsed_json": improved_json,
+        "fields": improved_fields,
         "explanation": result.get("explanation", ""),
-        "changes": result.get("changes", [])
+        "changes": result.get("changes", []),
+        "saved_prompt": saved_prompt
     }
 
 @router.post("/prompts/{prompt_id}/save-improved")
@@ -533,12 +652,15 @@ def save_improved_prompt_endpoint(prompt_id: str, payload: SaveImprovedPromptReq
         if payload.mode == "new_version":
             title = f"{title} (Bản cải tiến)"
 
+    # Luôn bảo tồn văn bản gốc nguyên bản của prompt, bất kể cải tiến bao nhiêu lần
+    orig_raw = prompt.get("original_raw_content") or prompt.get("raw_content") or prompt.get("prompt_code") or ""
+
     if payload.mode == "new_version":
         saved_prompt = PromptRepository.save_as_new_version(
             parent_prompt_id=prompt_id,
             title=title,
             prompt_code=payload.prompt_code.strip(),
-            raw_content=payload.raw_content or payload.prompt_code.strip(),
+            raw_content=orig_raw,
             prompt_type=payload.prompt_type or "json",
             parsed_json=payload.parsed_json,
             fields=payload.fields
@@ -549,7 +671,7 @@ def save_improved_prompt_endpoint(prompt_id: str, payload: SaveImprovedPromptReq
             prompt_id=prompt_id,
             title=title,
             prompt_code=payload.prompt_code.strip(),
-            raw_content=payload.raw_content or payload.prompt_code.strip(),
+            raw_content=orig_raw,
             prompt_type=payload.prompt_type or "json",
             parsed_json=payload.parsed_json,
             fields=payload.fields
@@ -809,6 +931,89 @@ def get_providers_config():
         }
     }
 
+@router.get("/ai/ping")
+def ping_ai_endpoint():
+    """Kiểm tra tình trạng kết nối tới mô hình AI và đo độ trễ mạng."""
+    import time
+    import ssl
+    import urllib.request
+    from app.config import get_ai_config
+
+    cfg = get_ai_config()
+    api_key = (cfg.get("api_key") or "").strip()
+    base_url = (cfg.get("base_url") or "").rstrip("/")
+    chat_model = cfg.get("chat_model") or cfg.get("model") or "unknown"
+    image_model = cfg.get("image_model") or "unknown"
+    provider = cfg.get("provider") or "openai"
+
+    if not api_key:
+        return {
+            "status": "error",
+            "message": "Chưa cấu hình API Key trong file .env",
+            "latency_ms": 0,
+            "model": chat_model,
+            "image_model": image_model,
+            "base_url": base_url,
+            "provider": provider
+        }
+
+    if not base_url:
+        return {
+            "status": "error",
+            "message": "Chưa cấu hình Base URL trong file .env",
+            "latency_ms": 0,
+            "model": chat_model,
+            "image_model": image_model,
+            "base_url": base_url,
+            "provider": provider
+        }
+
+    ctx = ssl.create_default_context()
+    ctx.check_hostname = False
+    ctx.verify_mode = ssl.CERT_NONE
+
+    t0 = time.time()
+    try:
+        req = urllib.request.Request(
+            f"{base_url}/models",
+            headers={
+                "Authorization": f"Bearer {api_key}",
+                "User-Agent": "AI-Prompt-Studio/1.0"
+            }
+        )
+        with urllib.request.urlopen(req, timeout=8, context=ctx) as resp:
+            latency_ms = round((time.time() - t0) * 1000)
+            if resp.status in (200, 204):
+                return {
+                    "status": "connected",
+                    "latency_ms": latency_ms,
+                    "model": chat_model,
+                    "image_model": image_model,
+                    "base_url": base_url,
+                    "provider": provider,
+                    "message": f"Kết nối AI ổn định ({latency_ms}ms)"
+                }
+            return {
+                "status": "error",
+                "latency_ms": latency_ms,
+                "model": chat_model,
+                "image_model": image_model,
+                "base_url": base_url,
+                "provider": provider,
+                "message": f"Server phản hồi mã HTTP {resp.status}"
+            }
+    except Exception as exc:
+        latency_ms = round((time.time() - t0) * 1000)
+        return {
+            "status": "error",
+            "latency_ms": latency_ms,
+            "model": chat_model,
+            "image_model": image_model,
+            "base_url": base_url,
+            "provider": provider,
+            "message": f"Không thể kết nối tới AI: {str(exc)}"
+        }
+
 @router.get("/config")
 def get_config():
     """Trả về cấu hình AI hiện tại (ẩn API key)."""
@@ -947,4 +1152,44 @@ async def sync_pull():
     """Kéo dữ liệu prompt mới từ GitHub feed."""
     from app.services.sync_manager import pull_data
     return pull_data()
+
+
+# ============================================================
+#  KOC MANAGEMENT — Lấy danh sách nhân vật KOC & Ảnh tham chiếu
+# ============================================================
+
+@router.get("/koc/list")
+def get_koc_list(refresh: bool = Query(False, description="Quét lại toàn bộ ổ đĩa")):
+    """Lấy danh sách các nhân vật KOC từ koc_management qua script list.py."""
+    try:
+        from app.services.koc_service import get_koc_names_and_counts
+        kocs = get_koc_names_and_counts(refresh=refresh)
+        return {"status": "success", "kocs": kocs}
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Không thể lấy danh sách KOC: {exc}") from exc
+
+
+@router.get("/koc/images")
+def get_koc_images(name: str = Query(..., description="Tên KOC cần lấy ảnh"), refresh: bool = Query(False)):
+    """Lấy danh sách ảnh của một nhân vật KOC."""
+    try:
+        from app.services.koc_service import get_images_for_koc
+        images = get_images_for_koc(name, refresh=refresh)
+        return {"status": "success", "koc": name, "images": images}
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Không thể lấy ảnh của KOC '{name}': {exc}") from exc
+
+
+@router.get("/koc/image")
+def serve_koc_image(path: str = Query(..., description="Đường dẫn tuyệt đối của tệp ảnh KOC")):
+    """Trả về file ảnh KOC để hiển thị preview trên giao diện người dùng."""
+    try:
+        from app.services.koc_service import validate_image_path
+        file_path = validate_image_path(path)
+        return FileResponse(str(file_path))
+    except (FileNotFoundError, ValueError) as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Lỗi khi đọc file ảnh: {exc}") from exc
+
 
