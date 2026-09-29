@@ -140,8 +140,23 @@ def get_ai_config() -> dict:
         merged["chat_model"] = merged.get("model", "gpt-4o-mini")
     if not merged.get("image_model"):
         merged["image_model"] = merged.get("chat_model") or merged.get("model", "gpt-4o-mini")
+
+    raw_img = merged.get("image_model") or ""
+    merged["raw_image_models"] = raw_img
+    models_list = [m.strip() for m in raw_img.split(",") if m.strip()]
+    merged["image_models"] = models_list if models_list else [raw_img or "cx/gpt-image-2.5"]
+    merged["default_image_model"] = merged["image_models"][0]
+    # image_model trỏ vào model mặc định đầu tiên để các chỗ gọi trực tiếp không bị lỗi chuỗi gộp có dấu phẩy
+    merged["image_model"] = merged["default_image_model"]
+
     merged["model_name"] = merged["chat_model"]
     return merged
+
+
+def get_image_models() -> list:
+    """Trả về danh sách tất cả các mô hình AI tạo ảnh được cấu hình trong .env."""
+    cfg = get_ai_config()
+    return cfg.get("image_models") or ["cx/gpt-image-2.5"]
 
 
 def save_ai_config(cfg: dict):

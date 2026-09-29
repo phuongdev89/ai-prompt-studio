@@ -159,16 +159,45 @@ def call_openai_images_generations(
     return None
 
 
+def sanitize_prompt_for_image_generation(prompt_str: str) -> str:
+    """
+    Sanitizes prompt text or JSON string before sending to image generation API.
+    Removes any specific filename placeholders (image_0.png, input.jpg, etc.)
+    and standardizes them to [ATTACHED_PHOTO] so downstream endpoints never
+    reject requests with 'Vui lòng tải lên ảnh tham chiếu...'.
+    """
+    if not prompt_str or not isinstance(prompt_str, str):
+        return prompt_str
+
+    stripped = prompt_str.strip()
+    if (stripped.startswith("{") and stripped.endswith("}")) or (stripped.startswith("[") and stripped.endswith("]")):
+        try:
+            parsed = json.loads(stripped)
+            if isinstance(parsed, dict):
+                from app.services.ai_converter import normalize_reference_image_in_json
+                normalized, _ = normalize_reference_image_in_json(parsed)
+                return json.dumps(normalized, ensure_ascii=False, indent=2)
+        except Exception:
+            pass
+
+    from app.services.ai_converter import sanitize_text_reference_images
+    return sanitize_text_reference_images(prompt_str)
+
 def call_ai_generate_image(
     prompt_text: str, reference_image: Optional[str] = None,
     extra_description: Optional[str] = None, size: str = "1024x1024",
     quality: str = "hd", image_detail: str = "high",
     provider: Optional[str] = None,
+    model: Optional[str] = None,
 ) -> Tuple[bool, Optional[str], Optional[str], str]:
     cfg = get_ai_config()
     api_key = cfg.get("api_key", "")
     base_url = cfg.get("base_url") or "https://api.openai.com/v1"
-    model_name = cfg.get("image_model") or cfg.get("chat_model") or cfg.get("model") or "gpt-4o-mini"
+    
+    # Ưu tiên model được người dùng chọn từ dropdown, nếu không có lấy model mặc định đầu tiên
+    available_models = cfg.get("image_models") or [cfg.get("image_model") or "cx/gpt-image-2.5"]
+    model_name = model.strip() if (model and model.strip()) else available_models[0]
+    
     timeout = int(cfg.get("timeout", 300))
     if not api_key:
         return False, None, None, "Chưa cấu hình API key"
@@ -176,6 +205,7 @@ def call_ai_generate_image(
     if extra_description and extra_description.strip():
         parts.append(f"[Yêu cầu phụ]: {extra_description.strip()}")
     full_prompt = "\n\n".join(parts)
+    full_prompt = sanitize_prompt_for_image_generation(full_prompt)
     image_source = call_openai_images_generations(
         base_url, api_key, model_name, full_prompt, timeout,
         reference_image=reference_image, image_detail=image_detail,

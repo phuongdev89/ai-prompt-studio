@@ -211,7 +211,7 @@ def enrich_recommended_prompts(recs: List[Dict[str, Any]]) -> List[Dict[str, Any
         db_prompts = {row["id"]: row for row in cursor.fetchall()}
 
         cursor.execute(f"""
-            SELECT prompt_id, url, local_path, filename
+            SELECT prompt_id, url, local_path, filename, status
             FROM images
             WHERE prompt_id IN ({placeholders})
             ORDER BY order_index ASC, id ASC
@@ -221,8 +221,8 @@ def enrich_recommended_prompts(recs: List[Dict[str, Any]]) -> List[Dict[str, Any
         for r in img_rows:
             if r["prompt_id"] not in img_map:
                 img_path = ""
-                if r.get("local_path") and r.get("filename"):
-                    img_path = f"/data/images/{r['filename']}"
+                if r.get("filename"):
+                    img_path = f"/media/{r['filename']}"
                 elif r.get("url"):
                     img_path = r["url"]
                 img_map[r["prompt_id"]] = img_path

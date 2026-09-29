@@ -195,18 +195,25 @@ class PromptRepository:
             return prompt
 
     @staticmethod
-    def update_prompt_json_structure(prompt_id: str, parsed_json: Dict[str, Any], prompt_code: str) -> bool:
+    def update_prompt_json_structure(prompt_id: str, parsed_json: Dict[str, Any], prompt_code: str, requires_reference: Optional[bool] = None) -> bool:
         from app.services.parser import extract_flat_fields
         with get_db() as conn:
             cursor = conn.cursor()
             parsed_json_str = json.dumps(parsed_json, ensure_ascii=False)
             
             # Update prompt table
-            cursor.execute("""
-                UPDATE prompts 
-                SET parsed_json = ?, prompt_code = ?, prompt_type = 'json'
-                WHERE id = ?
-            """, (parsed_json_str, prompt_code, prompt_id))
+            if requires_reference is not None:
+                cursor.execute("""
+                    UPDATE prompts 
+                    SET parsed_json = ?, prompt_code = ?, prompt_type = 'json', requires_reference = ?
+                    WHERE id = ?
+                """, (parsed_json_str, prompt_code, 1 if requires_reference else 0, prompt_id))
+            else:
+                cursor.execute("""
+                    UPDATE prompts 
+                    SET parsed_json = ?, prompt_code = ?, prompt_type = 'json'
+                    WHERE id = ?
+                """, (parsed_json_str, prompt_code, prompt_id))
 
             # Fetch category
             cursor.execute("SELECT category FROM prompts WHERE id = ?", (prompt_id,))
@@ -331,13 +338,20 @@ class PromptRepository:
             cursor.execute("SELECT prompt_type, COUNT(*) as count FROM prompts GROUP BY prompt_type")
             by_type = {row["prompt_type"]: row["count"] for row in cursor.fetchall()}
 
+            cursor.execute("SELECT CASE WHEN category = 'character' THEN 'image' ELSE COALESCE(category, 'image') END as cat, COUNT(*) as count FROM prompts GROUP BY cat")
+            by_category = {row["cat"]: row["count"] for row in cursor.fetchall()}
+            for cat_key in ("image", "video", "content"):
+                if cat_key not in by_category:
+                    by_category[cat_key] = 0
+
             return {
                 "total_prompts": total_prompts,
                 "total_images": total_images,
                 "downloaded_images": downloaded_images,
                 "pending_images": pending_images,
                 "failed_images": failed_images,
-                "by_type": by_type
+                "by_type": by_type,
+                "by_category": by_category
             }
 
     @staticmethod

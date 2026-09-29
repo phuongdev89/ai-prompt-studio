@@ -34,6 +34,7 @@ app.add_middleware(
 # Mount Static Assets & Local Images
 app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 app.mount("/media", StaticFiles(directory=str(IMAGES_DIR)), name="media")
+app.mount("/data/images", StaticFiles(directory=str(IMAGES_DIR)), name="data_images")
 
 # Include REST API
 app.include_router(api_router)

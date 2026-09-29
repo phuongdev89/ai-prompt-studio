@@ -44,7 +44,7 @@ class UpdatePromptRequest(BaseModel):
 class ImprovePromptRequest(BaseModel):
     instruction: str = Field(..., description="Yêu cầu cải tiến của người dùng")
     provider: Optional[str] = Field(None, description="Nhà cung cấp AI: 'openai'")
-    auto_save: Optional[bool] = Field(True, description="Tự động lưu đè vào bản ghi sau khi cải tiến thành công")
+    auto_save: Optional[bool] = Field(False, description="Tự động lưu đè vào bản ghi sau khi cải tiến thành công (mặc định False)")
 
 class SaveImprovedPromptRequest(BaseModel):
     mode: str = Field("overwrite", description="Chế độ lưu: 'overwrite' hoặc 'new_version'")
@@ -61,6 +61,7 @@ class ExtractJsonFromImageRequest(BaseModel):
 
 class GenerateImageRequest(BaseModel):
     prompt: str = Field(..., description="Nội dung câu lệnh tạo ảnh")
+    model: Optional[str] = Field(None, description="Tên mô hình AI tạo ảnh được chọn từ danh sách")
     reference_image: Optional[str] = Field(None, description="Chuỗi Base64 hoặc URL ảnh tham chiếu")
     extra_description: Optional[str] = Field(None, description="Mô tả phụ bổ sung")
     size: Optional[str] = Field("1024x1024", description="Kích thước ảnh")
@@ -424,8 +425,19 @@ def convert_prompt_to_json(prompt_id: str):
     if not success:
         raise HTTPException(status_code=500, detail=msg)
 
+    has_ref = False
+    if isinstance(parsed_json, dict):
+        ref_analysis = parsed_json.get("reference_image_analysis")
+        if isinstance(ref_analysis, dict) and ref_analysis.get("reference_provided"):
+            has_ref = True
+
     prompt_code = json.dumps(parsed_json, indent=2, ensure_ascii=False)
-    PromptRepository.update_prompt_json_structure(prompt_id, parsed_json, prompt_code)
+    PromptRepository.update_prompt_json_structure(
+        prompt_id,
+        parsed_json,
+        prompt_code,
+        requires_reference=True if has_ref else None
+    )
 
     # Return refreshed prompt
     refreshed = PromptRepository.get_prompt_by_id(prompt_id)
@@ -522,7 +534,12 @@ def get_or_generate_compact_prompt_endpoint(
     prompt_id: str,
     payload: Optional[CompactPromptRequest] = None
 ):
-    from app.services.ai_compact_generator import call_ai_generate_compact_prompt
+    from app.services.ai_compact_generator import (
+        call_ai_generate_compact_prompt,
+        is_reference_required,
+        ensure_reference_in_compact_prompt,
+        truncate_preserving_token
+    )
 
     prompt = PromptRepository.get_prompt_by_id(prompt_id)
     if not prompt:
@@ -530,8 +547,14 @@ def get_or_generate_compact_prompt_endpoint(
 
     force_refresh = payload.force_refresh if payload else False
     existing_compact = (prompt.get("compact_prompt") or "").strip()
+    req_ref = is_reference_required(prompt=prompt)
 
     if existing_compact and not force_refresh:
+        # Kiểm tra nếu prompt yêu cầu ảnh tham chiếu nhưng trong existing_compact còn thiếu [ATTACHED_PHOTO]
+        if req_ref and "[ATTACHED_PHOTO]" not in existing_compact:
+            existing_compact = ensure_reference_in_compact_prompt(existing_compact, requires_reference=True)
+            PromptRepository.update_compact_prompt(prompt_id, existing_compact)
+
         return {
             "status": "success",
             "prompt_id": prompt_id,
@@ -540,7 +563,7 @@ def get_or_generate_compact_prompt_endpoint(
             "is_generated": False
         }
 
-    # Generate via AI
+    # Generate via AI hoặc trích xuất prompt gốc
     source_prompt = (payload.prompt.strip() if (payload and payload.prompt and payload.prompt.strip()) else "")
     if not source_prompt:
         source_prompt = prompt.get("prompt_code") or prompt.get("raw_content") or ""
@@ -549,20 +572,39 @@ def get_or_generate_compact_prompt_endpoint(
     if not clean_source:
         raise HTTPException(status_code=400, detail="Không có nội dung câu lệnh để rút gọn")
 
-    # Nếu prompt gốc đang < 1000 ký tự thì lấy luôn nó làm prompt tối giản
-    if len(clean_source) < 1000:
-        PromptRepository.update_compact_prompt(prompt_id, clean_source)
+    # Kiểm tra prompt gốc: Nếu prompt gốc đang < 1000 ký tự (và không phải JSON phức tạp), sử dụng luôn
+    is_json = clean_source.startswith("{") and clean_source.endswith("}")
+    orig_raw = (prompt.get("original_raw_content") or "").strip()
+    use_orig_text = None
+
+    if orig_raw and not (orig_raw.startswith("{") and orig_raw.endswith("}")) and len(orig_raw) < 1000:
+        use_orig_text = orig_raw
+    elif not is_json and len(clean_source) < 1000:
+        use_orig_text = clean_source
+
+    if use_orig_text and not force_refresh:
+        candidate = use_orig_text
+        if req_ref:
+            candidate = ensure_reference_in_compact_prompt(candidate, requires_reference=True)
+        if len(candidate) > 1000:
+            candidate = truncate_preserving_token(candidate, "[ATTACHED_PHOTO]", 1000)
+
+        PromptRepository.update_compact_prompt(prompt_id, candidate)
         return {
             "status": "success",
             "prompt_id": prompt_id,
-            "compact_prompt": clean_source,
-            "char_count": len(clean_source),
+            "compact_prompt": candidate,
+            "char_count": len(candidate),
             "is_generated": False,
             "message": "Prompt gốc đã dưới 1000 ký tự, sử dụng luôn làm prompt tối giản."
         }
 
     category = prompt.get("category") or "image"
-    success, generated_compact, msg = call_ai_generate_compact_prompt(clean_source, category=category)
+    success, generated_compact, msg = call_ai_generate_compact_prompt(
+        clean_source,
+        category=category,
+        requires_reference=req_ref
+    )
     if not success or not generated_compact:
         raise HTTPException(status_code=500, detail=msg or "Lỗi khi gọi AI sinh prompt tối giản")
 
@@ -793,7 +835,8 @@ def generate_image_for_prompt(prompt_id: str, payload: GenerateImageRequest):
         size=payload.size or "1024x1024",
         quality=payload.quality or "hd",
         image_detail=payload.image_detail or "high",
-        provider=payload.provider
+        provider=payload.provider,
+        model=payload.model
     )
 
     if not success:
@@ -927,23 +970,29 @@ def get_providers_config():
             "model": cfg.get("chat_model") or cfg.get("model"),
             "chat_model": cfg.get("chat_model") or cfg.get("model"),
             "image_model": cfg.get("image_model"),
+            "image_models": cfg.get("image_models", [cfg.get("image_model")]),
+            "default_image_model": cfg.get("default_image_model", cfg.get("image_model")),
             "image_reference_support": cfg.get("image_reference_support", False),
         }
     }
 
 @router.get("/ai/ping")
-def ping_ai_endpoint():
-    """Kiểm tra tình trạng kết nối tới mô hình AI và đo độ trễ mạng."""
+def ping_ai_endpoint(
+    mode: Optional[str] = Query("pingpong", description="Chế độ kiểm tra: 'pingpong' (gọi suy luận AI thật để đo thời gian phản hồi) hoặc 'fast'")
+):
+    """Kiểm tra tình trạng kết nối tới mô hình AI và đo độ trễ mạng thực tế qua ping-pong inference."""
     import time
     import ssl
+    import json
     import urllib.request
+    import urllib.error
     from app.config import get_ai_config
 
     cfg = get_ai_config()
     api_key = (cfg.get("api_key") or "").strip()
     base_url = (cfg.get("base_url") or "").rstrip("/")
     chat_model = cfg.get("chat_model") or cfg.get("model") or "unknown"
-    image_model = cfg.get("image_model") or "unknown"
+    image_model = cfg.get("default_image_model") or cfg.get("image_model") or "unknown"
     provider = cfg.get("provider") or "openai"
 
     if not api_key:
@@ -974,6 +1023,52 @@ def ping_ai_endpoint():
 
     t0 = time.time()
     try:
+        # Thực hiện ping-pong thực thụ: gửi prompt 'ping' tới chat completion và nhận 'pong'
+        if mode == "pingpong":
+            endpoint = f"{base_url}/chat/completions"
+            payload = {
+                "model": chat_model,
+                "messages": [
+                    {"role": "user", "content": "ping"}
+                ],
+                "max_tokens": 10,
+                "temperature": 0
+            }
+            req_data = json.dumps(payload).encode("utf-8")
+            req = urllib.request.Request(
+                endpoint,
+                data=req_data,
+                headers={
+                    "Content-Type": "application/json",
+                    "Authorization": f"Bearer {api_key}",
+                    "User-Agent": "AI-Prompt-Studio/1.0"
+                },
+                method="POST"
+            )
+            with urllib.request.urlopen(req, timeout=15, context=ctx) as resp:
+                body_bytes = resp.read()
+                latency_ms = round((time.time() - t0) * 1000)
+                pong_reply = ""
+                try:
+                    resp_json = json.loads(body_bytes.decode("utf-8", errors="ignore"))
+                    choices = resp_json.get("choices", [])
+                    if choices and "message" in choices[0]:
+                        pong_reply = choices[0]["message"].get("content", "").strip()
+                except Exception:
+                    pong_reply = "pong"
+
+                return {
+                    "status": "connected",
+                    "latency_ms": latency_ms,
+                    "model": chat_model,
+                    "image_model": image_model,
+                    "base_url": base_url,
+                    "provider": provider,
+                    "reply": pong_reply,
+                    "message": f"Phản hồi AI thành công ({latency_ms}ms)"
+                }
+
+        # Chế độ fast (GET /models) nếu được chỉ định
         req = urllib.request.Request(
             f"{base_url}/models",
             headers={
@@ -1002,6 +1097,41 @@ def ping_ai_endpoint():
                 "provider": provider,
                 "message": f"Server phản hồi mã HTTP {resp.status}"
             }
+
+    except urllib.error.HTTPError as he:
+        latency_ms = round((time.time() - t0) * 1000)
+        err_msg = he.read().decode("utf-8", errors="ignore")[:250]
+        # Nếu chat/completions bị 404/405, fallback thử sang /models
+        if he.code in (404, 405):
+            try:
+                t_fb = time.time()
+                req_fb = urllib.request.Request(
+                    f"{base_url}/models",
+                    headers={"Authorization": f"Bearer {api_key}"}
+                )
+                with urllib.request.urlopen(req_fb, timeout=8, context=ctx) as resp_fb:
+                    latency_ms = round((time.time() - t_fb) * 1000)
+                    return {
+                        "status": "connected",
+                        "latency_ms": latency_ms,
+                        "model": chat_model,
+                        "image_model": image_model,
+                        "base_url": base_url,
+                        "provider": provider,
+                        "message": f"Kết nối Gateway AI ({latency_ms}ms)"
+                    }
+            except Exception:
+                pass
+
+        return {
+            "status": "error",
+            "latency_ms": latency_ms,
+            "model": chat_model,
+            "image_model": image_model,
+            "base_url": base_url,
+            "provider": provider,
+            "message": f"HTTP {he.code}: {err_msg}"
+        }
     except Exception as exc:
         latency_ms = round((time.time() - t0) * 1000)
         return {
@@ -1026,6 +1156,8 @@ def get_config():
         "model": cfg.get("model"),
         "chat_model": cfg.get("chat_model"),
         "image_model": cfg.get("image_model"),
+        "image_models": cfg.get("image_models", [cfg.get("image_model")]),
+        "default_image_model": cfg.get("default_image_model", cfg.get("image_model")),
         "image_reference_support": cfg.get("image_reference_support", False),
         "s3_enabled": cfg.get("s3_enabled", False),
         "s3_endpoint_url": cfg.get("s3_endpoint_url", ""),
