@@ -9,14 +9,15 @@ from app.services.downloader import download_prompt_images_now
 router = APIRouter(prefix="/api", tags=["prompts"])
 
 class CreatePromptRequest(BaseModel):
-    prompt: str = Field(..., description="Nội dung câu lệnh (JSON hoặc Text)")
+    prompt: Optional[str] = Field("", description="Nội dung câu lệnh (JSON hoặc Text)")
     title: Optional[str] = Field(None, description="Tiêu đề câu lệnh tùy chỉnh")
     media: Optional[str] = Field(None, description="URL hoặc đường dẫn ảnh/video kết quả mẫu")
     images: Optional[List[str]] = Field(None, description="Danh sách URL hoặc Base64 ảnh tải lên từ máy tính")
-    category: Optional[str] = Field("image", description="Loại prompt: 'image' hoặc 'content'")
+    category: Optional[str] = Field("image", description="Loại prompt: 'image', 'video' hoặc 'content'")
     note: Optional[str] = Field("", description="Ghi chú / chú thích cho câu lệnh")
     sample_content: Optional[str] = Field(None, description="Nội dung kết quả mẫu dạng văn bản")
     requires_reference: Optional[bool] = Field(None, description="Cờ yêu cầu ảnh tham chiếu (mặc định bật cho prompt ảnh)")
+    scenes: Optional[List[Dict[str, str]]] = Field(None, description="Danh sách cảnh video (dialogue, action, camera)")
 
 class SetPrimaryFieldRequest(BaseModel):
     is_primary: bool = Field(..., description="Cờ đánh dấu thuộc tính chính")
@@ -68,6 +69,15 @@ class GenerateImageRequest(BaseModel):
     quality: Optional[str] = Field("hd", description="Chất lượng ảnh")
     image_detail: Optional[str] = Field("high", description="Mức độ bám sát chi tiết ảnh tham chiếu")
     provider: Optional[str] = Field(None, description="Nhà cung cấp: 'openai'")
+
+class GenerateVideoRequest(BaseModel):
+    prompt: str = Field(..., description="Nội dung câu lệnh render video cảnh này")
+    model: Optional[str] = Field(None, description="Tên mô hình AI tạo video")
+    ratio: Optional[str] = Field("9:16", description="Tỷ lệ khung hình: '9:16' hoặc '16:9'")
+    duration: Optional[int] = Field(6, description="Thời lượng cảnh tính bằng giây: 4, 6, 8, 10")
+    reference_media: Optional[str] = Field(None, description="Ảnh hoặc video tham chiếu")
+    scene_number: Optional[int] = Field(None, description="Số thứ tự cảnh")
+    provider: Optional[str] = Field(None, description="Nhà cung cấp")
 
 class UploadReferenceImageRequest(BaseModel):
     image: str = Field(..., description="Ảnh tham chiếu dạng data:image/...;base64,...")
@@ -128,7 +138,12 @@ def list_prompts(
 @router.post("/prompts/")
 def create_prompt(payload: CreatePromptRequest):
     import re
-    if not payload.prompt or not payload.prompt.strip():
+    # For video with scenes, prompt may be empty (built from scenes)
+    cat = payload.category or "image"
+    if cat == "character":
+        cat = "image"
+    has_scenes = payload.scenes and cat == 'video' and len(payload.scenes) > 0
+    if (not payload.prompt or not payload.prompt.strip()) and not has_scenes:
         raise HTTPException(status_code=400, detail="Nội dung prompt không được để trống")
 
     # Combine images from payload.media and payload.images
@@ -145,10 +160,20 @@ def create_prompt(payload: CreatePromptRequest):
             if isinstance(img, str) and img.strip():
                 media_list.append(img.strip())
 
+    raw_prompt_text = payload.prompt or ""
     parsed_data = parse_incoming_prompt(
-        raw_content=payload.prompt,
+        raw_content=raw_prompt_text.strip() or "Video prompt",
         raw_media=None
     )
+
+    # Handle video scenes: build structured prompt from scenes
+    if payload.scenes and cat == 'video':
+        scene_parts = []
+        for i, scene in enumerate(payload.scenes, 1):
+            part = f"## Cảnh {i}\nLời thoại: {scene.get('dialogue', '')}\nHành động: {scene.get('action', '')}\nGóc máy: {scene.get('camera', '')}"
+            scene_parts.append(part)
+        raw_content = "\n\n".join(scene_parts)
+        parsed_data = parse_incoming_prompt(raw_content=raw_content, raw_media=None)
     if payload.title and payload.title.strip():
         clean_title = payload.title.strip()
         parsed_data["title"] = clean_title
@@ -157,9 +182,6 @@ def create_prompt(payload: CreatePromptRequest):
             if f.get("key") == "title":
                 f["value"] = clean_title
     parsed_data["images"] = media_list
-    cat = payload.category or "image"
-    if cat == "character":
-        cat = "image"
     parsed_data["category"] = cat
     parsed_data["note"] = payload.note or ""
     parsed_data["sample_content"] = payload.sample_content
@@ -443,6 +465,33 @@ def convert_prompt_to_json(prompt_id: str):
     refreshed = PromptRepository.get_prompt_by_id(prompt_id)
     return refreshed
 
+@router.post("/prompts/{prompt_id}/analyze-script")
+def analyze_prompt_script_endpoint(prompt_id: str):
+    """Phân tích văn bản thô thành kịch bản phân cảnh video chuẩn điện ảnh."""
+    from app.services.video_script_analyzer import call_ai_analyze_video_script, format_video_script_markdown
+
+    prompt = PromptRepository.get_prompt_by_id(prompt_id)
+    if not prompt:
+        raise HTTPException(status_code=404, detail="Prompt không tồn tại")
+
+    raw_text = prompt.get("original_raw_content") or prompt.get("raw_content") or prompt.get("prompt_code") or ""
+    if not raw_text.strip():
+        raise HTTPException(status_code=400, detail="Không có nội dung văn bản gốc để phân tích kịch bản")
+
+    success, parsed_json, msg = call_ai_analyze_video_script(raw_text)
+    if not success:
+        raise HTTPException(status_code=500, detail=msg)
+
+    prompt_code = format_video_script_markdown(parsed_json)
+    PromptRepository.update_prompt_video_script(
+        prompt_id=prompt_id,
+        parsed_json=parsed_json,
+        prompt_code=prompt_code
+    )
+
+    refreshed = PromptRepository.get_prompt_by_id(prompt_id)
+    return refreshed
+
 @router.post("/prompts/{prompt_id}/extract-json-from-image")
 def extract_json_from_image_endpoint(prompt_id: str, payload: ExtractJsonFromImageRequest):
     import json
@@ -526,6 +575,41 @@ def extract_json_from_image_endpoint(prompt_id: str, payload: ExtractJsonFromIma
         "status": "success",
         "message": "Đã tạo prompt mới với JSON gốc từ ảnh thành công!",
         "prompt": created_prompt
+    }
+
+@router.post("/prompts/extract-json-from-uploaded-image")
+def extract_json_from_uploaded_image_endpoint(payload: ExtractJsonFromImageRequest):
+    """Phân tích ảnh upload từ client (base64) để trích xuất JSON VisionStruct điền vào form thêm mới."""
+    import json
+    from app.services.ai_converter import call_ai_convert_to_json
+
+    b64_image_data = payload.image.strip()
+    if not b64_image_data:
+        raise HTTPException(status_code=400, detail="Không có dữ liệu ảnh để phân tích")
+
+    success, parsed_json, msg = call_ai_convert_to_json(
+        raw_text="",
+        provider=payload.provider,
+        reference_image_base64=b64_image_data
+    )
+    if not success:
+        raise HTTPException(status_code=500, detail=msg)
+
+    prompt_code = json.dumps(parsed_json, indent=2, ensure_ascii=False)
+    # Extract title if possible
+    suggested_title = ""
+    if isinstance(parsed_json, dict):
+        suggested_title = parsed_json.get("title") or ""
+        if not suggested_title and "global_context" in parsed_json:
+            scene_desc = parsed_json["global_context"].get("scene_description", "")
+            if scene_desc:
+                suggested_title = scene_desc[:60].strip()
+
+    return {
+        "status": "success",
+        "json_code": prompt_code,
+        "parsed_json": parsed_json,
+        "suggested_title": suggested_title
     }
 
 @router.post("/prompts/{prompt_id}/compact")
@@ -877,6 +961,64 @@ def save_generated_image_endpoint(prompt_id: str, payload: SaveGeneratedImageReq
         "prompt": refreshed
     }
 
+@router.post("/prompts/{prompt_id}/generate-video")
+def generate_video_for_prompt(prompt_id: str, payload: GenerateVideoRequest):
+    from app.services.video_generator import call_ai_generate_video
+    prompt = PromptRepository.get_prompt_by_id(prompt_id)
+    if not prompt:
+        raise HTTPException(status_code=404, detail="Prompt không tồn tại")
+
+    prompt_text = (payload.prompt or "").strip()
+    if not prompt_text:
+        prompt_text = prompt.get("prompt_code") or prompt.get("raw_content") or ""
+
+    if not prompt_text.strip():
+        raise HTTPException(status_code=400, detail="Câu lệnh prompt không được để trống")
+
+    success, video_result, fmt, msg = call_ai_generate_video(
+        prompt_text=prompt_text,
+        model=payload.model,
+        ratio=payload.ratio or "9:16",
+        duration=payload.duration or 6,
+        reference_media=payload.reference_media,
+        scene_number=payload.scene_number
+    )
+
+    if not success:
+        raise HTTPException(status_code=500, detail=msg)
+
+    return {
+        "status": "success",
+        "video_url": video_result,
+        "format": fmt,
+        "message": msg,
+        "prompt_id": prompt_id,
+        "scene_number": payload.scene_number
+    }
+
+@router.post("/prompts/{prompt_id}/save-generated-video")
+def save_generated_video_endpoint(prompt_id: str, payload: Dict[str, Any] = Body(default={})):
+    from app.services.video_generator import save_generated_video_to_prompt
+    prompt = PromptRepository.get_prompt_by_id(prompt_id)
+    if not prompt:
+        raise HTTPException(status_code=404, detail="Prompt không tồn tại")
+
+    video_url = (payload.get("video_url") or "").strip()
+    if not video_url:
+        raise HTTPException(status_code=400, detail="Dữ liệu video không được để trống")
+
+    success, filename, msg = save_generated_video_to_prompt(prompt_id=prompt_id, video_data_or_url=video_url)
+    if not success:
+        raise HTTPException(status_code=500, detail=msg)
+
+    refreshed = PromptRepository.get_prompt_by_id(prompt_id)
+    return {
+        "status": "success",
+        "message": msg,
+        "video_url": filename,
+        "prompt": refreshed
+    }
+
 @router.post("/prompts/{prompt_id}/add-images")
 def add_images_to_prompt_endpoint(prompt_id: str, payload: AddImagesRequest):
     import re
@@ -973,6 +1115,18 @@ def get_providers_config():
             "image_models": cfg.get("image_models", [cfg.get("image_model")]),
             "default_image_model": cfg.get("default_image_model", cfg.get("image_model")),
             "image_reference_support": cfg.get("image_reference_support", False),
+            "video_model": cfg.get("video_model", "kling-2.0"),
+            "video_models": cfg.get("video_models", [
+                "kling-2.0",
+                "kling-1.5",
+                "hailuo-minimax",
+                "sora-v1",
+                "runway-gen3",
+                "luma-ray2",
+                "seedance-video",
+                "pika-2.0"
+            ]),
+            "default_video_model": cfg.get("video_model", "kling-2.0"),
         }
     }
 

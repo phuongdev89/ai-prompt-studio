@@ -48,6 +48,7 @@ _DEFAULT_CONFIG = {
     "model": "gpt-4o-mini",
     "chat_model": "gpt-4o-mini",
     "image_model": "cx/gpt-5.6-sol-image",
+    "video_model": "zpro-payg/grok-imagine-video",
     "image_reference_support": False,
     "timeout": 300,
     "stream": True,
@@ -69,6 +70,7 @@ _ENV_KEY_MAP = {
     "AI_MODEL": "model",
     "AI_CHAT_MODEL": "chat_model",
     "AI_IMAGE_MODEL": "image_model",
+    "AI_VIDEO_MODEL": "video_model",
     "AI_IMAGE_REFERENCE_SUPPORT": "image_reference_support",
     "AI_TIMEOUT": "timeout",
     "AI_STREAM": "stream",
@@ -125,7 +127,7 @@ def get_ai_config() -> dict:
     saved = _read_env_file()
     merged = {**_DEFAULT_CONFIG, **saved}
 
-    for k in ("provider", "base_url", "api_key", "model", "chat_model", "image_model",
+    for k in ("provider", "base_url", "api_key", "model", "chat_model", "image_model", "video_model",
               "s3_endpoint_url", "s3_region", "s3_bucket", "s3_access_key_id",
               "s3_secret_access_key", "s3_key_prefix"):
         if isinstance(merged.get(k), str):
@@ -140,6 +142,8 @@ def get_ai_config() -> dict:
         merged["chat_model"] = merged.get("model", "gpt-4o-mini")
     if not merged.get("image_model"):
         merged["image_model"] = merged.get("chat_model") or merged.get("model", "gpt-4o-mini")
+    if not merged.get("video_model"):
+        merged["video_model"] = "zpro-payg/grok-imagine-video"
 
     raw_img = merged.get("image_model") or ""
     merged["raw_image_models"] = raw_img
@@ -149,6 +153,13 @@ def get_ai_config() -> dict:
     # image_model trỏ vào model mặc định đầu tiên để các chỗ gọi trực tiếp không bị lỗi chuỗi gộp có dấu phẩy
     merged["image_model"] = merged["default_image_model"]
 
+    raw_vid = merged.get("video_model") or ""
+    merged["raw_video_models"] = raw_vid
+    vid_models_list = [m.strip() for m in raw_vid.split(",") if m.strip()]
+    merged["video_models"] = vid_models_list if vid_models_list else ["zpro-payg/grok-imagine-video"]
+    merged["default_video_model"] = merged["video_models"][0]
+    merged["video_model"] = merged["default_video_model"]
+
     merged["model_name"] = merged["chat_model"]
     return merged
 
@@ -157,6 +168,12 @@ def get_image_models() -> list:
     """Trả về danh sách tất cả các mô hình AI tạo ảnh được cấu hình trong .env."""
     cfg = get_ai_config()
     return cfg.get("image_models") or ["cx/gpt-image-2.5"]
+
+
+def get_video_models() -> list:
+    """Trả về danh sách tất cả các mô hình AI tạo video được cấu hình trong .env."""
+    cfg = get_ai_config()
+    return cfg.get("video_models") or ["zpro-payg/grok-imagine-video"]
 
 
 def save_ai_config(cfg: dict):

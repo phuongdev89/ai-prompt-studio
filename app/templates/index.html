@@ -243,6 +243,10 @@
                             <i class="fa-solid fa-code text-indigo-200"></i>
                             <span>Chuyển sang JSON</span>
                         </button>
+                        <button onclick="analyzeScriptAI()" id="analyzeScriptBtn" class="hidden px-3.5 py-2.5 rounded-xl bg-gradient-to-r from-rose-600 via-pink-600 to-purple-600 hover:from-rose-500 hover:via-pink-500 hover:to-purple-500 text-white font-semibold text-sm shadow-lg shadow-rose-600/30 flex items-center gap-1.5 transition active:scale-95" title="Dùng AI phân tích văn bản gốc thành kịch bản phân cảnh chuẩn điện ảnh">
+                            <i class="fa-solid fa-clapperboard text-rose-200"></i>
+                            <span>Phân tích kịch bản</span>
+                        </button>
                         <button onclick="deleteCurrentPrompt()" class="px-3.5 py-2.5 rounded-xl bg-rose-500/10 hover:bg-rose-600 text-rose-400 hover:text-white font-medium text-sm border border-rose-500/30 hover:border-rose-600 flex items-center gap-1.5 transition active:scale-95" title="Xóa bản ghi này">
                             <i class="fa-regular fa-trash-can"></i>
                             <span class="hidden sm:inline">Xóa</span>
@@ -322,10 +326,13 @@
                         <!-- Slider Canvas (Takes available vertical space cleanly) -->
                         <div id="sliderWrapper" class="relative group rounded-xl overflow-hidden bg-dark-900 flex-1 min-h-0 flex items-center justify-center border border-dark-700 my-3">
                             <!-- Image Element -->
-                            <img id="currentSliderImg" src="" alt="Prompt Preview" 
+                            <img id="currentSliderImg" src="" alt="Prompt Preview"
                                  class="w-full h-full object-contain transition-transform duration-300 select-none cursor-pointer"
                                  onclick="openLightbox(this.src)"
                                  onerror="handleImgError(this)">
+
+                            <!-- Video Element -->
+                            <video id="currentSliderVideo" controls class="hidden w-full h-full object-contain rounded-xl select-none bg-black"></video>
                             
                             <!-- Placeholder when no image -->
                             <div id="noImgPlaceholder" class="hidden flex-col items-center justify-center p-6 text-center text-slate-500">
@@ -468,12 +475,12 @@
                         <!-- Injected by JavaScript based on active prompt -->
                     </form>
 
-                    <!-- Button: Tạo ảnh với AI (Visible in Character tab, placed directly below Tuỳ biến tham số) -->
+                    <!-- Button: Tạo ảnh / Video với AI (Visible in Character / Video tab, placed directly below Tuỳ biến tham số) -->
                     <div id="genImageActionSection" class="pt-3 border-t border-dark-700/70 flex-shrink-0">
-                        <button type="button" onclick="openGenerateImageModal()" id="generateImageBtn"
+                        <button type="button" onclick="handleGenerateActionClick()" id="generateImageBtn"
                                 class="w-full py-3 px-4 rounded-xl bg-gradient-to-r from-purple-600 via-pink-600 to-indigo-600 hover:from-purple-500 hover:via-pink-500 hover:to-indigo-500 text-white font-bold text-sm shadow-xl shadow-purple-600/25 flex items-center justify-center gap-2.5 transition transform active:scale-[0.98]">
-                            <i class="fa-solid fa-wand-magic-sparkles text-amber-300 text-sm animate-pulse"></i>
-                            <span>Tạo ảnh với AI</span>
+                            <i class="fa-solid fa-wand-magic-sparkles text-amber-300 text-sm animate-pulse" id="genImageBtnIcon"></i>
+                            <span id="genImageBtnText">Tạo ảnh với AI</span>
                         </button>
                     </div>
 
@@ -561,22 +568,38 @@
 
             <!-- Modal Form (2 fields as requested) -->
             <form id="createPromptForm" onsubmit="event.preventDefault(); submitCreatePrompt(event); return false;" class="p-6 space-y-4">
-                <!-- Field 1A: Media & Title for Image Tab -->
-                <div id="createCharacterMediaWrapper" class="space-y-3">
-                    <!-- Title Input for Image Prompt -->
-                    <div class="space-y-1.5">
-                        <label for="newPromptTitleInput" class="text-xs font-semibold text-slate-200 flex items-center justify-between">
-                            <span class="flex items-center gap-1.5">
-                                <i class="fa-solid fa-heading text-emerald-400"></i>
-                                <span>Tiêu đề câu lệnh</span>
-                            </span>
-                            <span class="text-[11px] text-slate-500 font-normal">Tùy chọn (Tự trích xuất nếu để trống)</span>
-                        </label>
-                        <input type="text" id="newPromptTitleInput"
-                               placeholder="Ví dụ: Chân dung nàng thơ áo dài trắng mùa thu Hà Nội..."
-                               class="w-full px-3.5 py-2.5 bg-dark-900 text-slate-100 text-xs rounded-xl border border-dark-700 focus:outline-none focus:border-brand-500 focus:ring-1 focus:ring-brand-500 placeholder-slate-500 transition">
-                    </div>
+                <!-- Category Selector -->
+                <div class="flex items-center gap-1.5 p-1 bg-dark-900 rounded-xl border border-dark-700">
+                    <button type="button" onclick="setCreateCategory('image')" id="createCatBtnImage"
+                            class="flex-1 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all duration-200 flex items-center justify-center gap-1.5 bg-gradient-to-r from-brand-600 to-emerald-600 text-white shadow-md shadow-brand-600/20">
+                        <i class="fa-solid fa-image"></i> Hình ảnh
+                    </button>
+                    <button type="button" onclick="setCreateCategory('video')" id="createCatBtnVideo"
+                            class="flex-1 px-3 py-1.5 rounded-lg text-xs font-medium transition-all duration-200 flex items-center justify-center gap-1.5 text-slate-400 hover:text-white hover:bg-dark-750">
+                        <i class="fa-solid fa-film"></i> Video
+                    </button>
+                    <button type="button" onclick="setCreateCategory('content')" id="createCatBtnContent"
+                            class="flex-1 px-3 py-1.5 rounded-lg text-xs font-medium transition-all duration-200 flex items-center justify-center gap-1.5 text-slate-400 hover:text-white hover:bg-dark-750">
+                        <i class="fa-solid fa-file-lines"></i> Bài viết
+                    </button>
+                </div>
 
+                <!-- Shared Title Input for All Categories -->
+                <div class="space-y-1.5">
+                    <label for="newPromptTitleInput" class="text-xs font-semibold text-slate-200 flex items-center justify-between">
+                        <span class="flex items-center gap-1.5">
+                            <i class="fa-solid fa-heading text-emerald-400" id="createTitleIcon"></i>
+                            <span id="createTitleLabel">Tiêu đề câu lệnh</span>
+                        </span>
+                        <span class="text-[11px] text-slate-500 font-normal">Tùy chọn (Tự trích xuất nếu để trống)</span>
+                    </label>
+                    <input type="text" id="newPromptTitleInput"
+                           placeholder="Ví dụ: Chân dung nàng thơ áo dài trắng mùa thu Hà Nội..."
+                           class="w-full px-3.5 py-2.5 bg-dark-900 text-slate-100 text-xs rounded-xl border border-dark-700 focus:outline-none focus:border-brand-500 focus:ring-1 focus:ring-brand-500 placeholder-slate-500 transition">
+                </div>
+
+                <!-- Field 1A: Media & Options for Image Tab -->
+                <div id="createCharacterMediaWrapper" class="space-y-3">
                     <div class="flex items-center justify-between pt-1">
                         <label class="text-xs font-semibold text-slate-200 flex items-center gap-1.5">
                             <i class="fa-regular fa-image text-brand-500"></i>
@@ -657,6 +680,74 @@
                     </div>
                 </div>
 
+                <!-- Field 1C: Video Scene Builder & Video Upload -->
+                <div id="createVideoWrapper" class="hidden space-y-3">
+                    <!-- Video Upload (File or URL) -->
+                    <div class="space-y-1.5">
+                        <div class="flex items-center justify-between pt-1">
+                            <label class="text-xs font-semibold text-slate-200 flex items-center gap-1.5">
+                                <i class="fa-solid fa-video text-rose-400"></i>
+                                <span>Video kết quả mẫu</span>
+                                <span class="text-slate-500 font-normal">(Tùy chọn)</span>
+                            </label>
+                            <!-- Method tabs -->
+                            <div class="flex bg-dark-900 p-0.5 rounded-lg border border-dark-700 text-[11px]">
+                                <button type="button" onclick="setCreateVideoMediaTab('upload')" id="btnCreateVideoTabUpload" class="px-2.5 py-1 rounded-md bg-dark-700 text-rose-400 font-medium transition flex items-center gap-1.5">
+                                    <i class="fa-solid fa-cloud-arrow-up text-[10px]"></i>
+                                    <span>Tải video lên</span>
+                                </button>
+                                <button type="button" onclick="setCreateVideoMediaTab('url')" id="btnCreateVideoTabUrl" class="px-2.5 py-1 rounded-md text-slate-400 hover:text-white transition flex items-center gap-1.5">
+                                    <i class="fa-solid fa-link text-[10px]"></i>
+                                    <span>Dán liên kết (URL)</span>
+                                </button>
+                            </div>
+                        </div>
+
+                        <!-- Mode 1: File Upload Dropzone -->
+                        <div id="createVideoUploadSection" class="space-y-2">
+                            <input type="file" id="newVideoFileInput" accept="video/*" class="hidden" onchange="handleVideoFileSelect(event)">
+                            <div id="videoDropzone" onclick="document.getElementById('newVideoFileInput').click()"
+                                 class="border-2 border-dashed border-dark-700 hover:border-rose-500/70 bg-dark-900/60 hover:bg-dark-900 rounded-xl p-4 text-center cursor-pointer transition flex flex-col items-center justify-center gap-1.5 group">
+                                <div class="w-9 h-9 rounded-xl bg-dark-800 group-hover:bg-rose-500/10 text-slate-400 group-hover:text-rose-400 flex items-center justify-center transition border border-dark-700">
+                                    <i class="fa-solid fa-cloud-arrow-up text-sm"></i>
+                                </div>
+                                <span class="text-[11px] text-slate-400"><span class="font-semibold text-rose-400">Nhấp chọn video</span> hoặc kéo thả vào đây (.mp4, .webm, .mov)</span>
+                            </div>
+                            <div id="videoFilePreview" class="hidden flex items-center gap-2 p-2.5 bg-dark-900/80 rounded-xl border border-dark-700">
+                                <i class="fa-solid fa-file-video text-rose-400"></i>
+                                <span id="videoFileName" class="text-xs text-slate-200 flex-1 truncate"></span>
+                                <span id="videoFileSize" class="text-[11px] text-slate-500"></span>
+                                <button type="button" onclick="clearVideoFile()" class="text-rose-400 hover:text-rose-300 transition">
+                                    <i class="fa-solid fa-xmark text-xs"></i>
+                                </button>
+                            </div>
+                        </div>
+
+                        <!-- Mode 2: URL Link Input -->
+                        <div id="createVideoUrlSection" class="hidden space-y-1">
+                            <input type="text" id="newVideoUrlInput" placeholder="Dán link video mẫu (VD: https://... MP4, YouTube, TikTok...)"
+                                   class="w-full px-3.5 py-2.5 bg-dark-900 text-slate-100 text-xs rounded-xl border border-dark-700 focus:outline-none focus:border-rose-500 focus:ring-1 focus:ring-rose-500 placeholder-slate-500 transition">
+                            <p class="text-[11px] text-slate-500">Hỗ trợ liên kết video trực tiếp hoặc nguồn tham khảo.</p>
+                        </div>
+                    </div>
+
+                    <!-- Scene Builder -->
+                    <div class="space-y-1.5">
+                        <label class="text-xs font-semibold text-slate-200 flex items-center justify-between">
+                            <span class="flex items-center gap-1.5">
+                                <i class="fa-solid fa-clapperboard text-rose-400"></i>
+                                <span>Phân cảnh kịch bản (Lời thoại + Hành động + Góc máy)</span>
+                            </span>
+                            <span class="text-[11px] text-slate-500 font-normal">Mỗi cảnh 1 thẻ</span>
+                        </label>
+                        <div id="scenesContainer" class="space-y-2"></div>
+                        <button type="button" onclick="addScene()"
+                                class="w-full px-3 py-2 rounded-xl border border-dashed border-dark-600 hover:border-rose-500/50 text-slate-400 hover:text-rose-300 text-xs font-medium transition flex items-center justify-center gap-1.5">
+                            <i class="fa-solid fa-plus text-[10px]"></i> Thêm cảnh mới
+                        </button>
+                    </div>
+                </div>
+
                 <!-- Field 1B: Note & Sample Content for Content Tab -->
                 <div id="createContentWrapper" class="hidden space-y-3">
                     <div class="space-y-1.5">
@@ -673,24 +764,32 @@
                         <label for="newSampleContentInput" class="text-xs font-semibold text-slate-200 flex items-center justify-between">
                             <span class="flex items-center gap-1.5">
                                 <i class="fa-solid fa-file-lines text-cyan-400"></i>
-                                <span>Content mẫu / Kết quả mẫu</span>
+                                <span>Nạp text mẫu (Content kết quả mẫu)</span>
                                 <span class="text-slate-500 font-normal">(Tùy chọn)</span>
                             </span>
                         </label>
                         <textarea id="newSampleContentInput" rows="4"
-                                  placeholder="Dán nội dung bài viết hoặc kịch bản mẫu vào đây nếu có..."
+                                  placeholder="Dán nội dung bài viết mẫu, bài viết hoàn chỉnh mẫu vào đây..."
                                   class="w-full px-3.5 py-2.5 bg-dark-900 text-slate-100 text-xs rounded-xl border border-dark-700 focus:outline-none focus:border-cyan-500 focus:ring-1 focus:ring-cyan-500 placeholder-slate-500 transition leading-relaxed"></textarea>
                     </div>
                 </div>
 
-                <!-- Field 2: Prompt Content -->
-                <div class="space-y-1.5">
+                <!-- Field 2: Prompt Content (hidden for video, uses scene builder) -->
+                <div id="createPromptSection" class="space-y-1.5">
                     <label for="newPromptInput" class="text-xs font-semibold text-slate-200 flex items-center justify-between">
                         <span class="flex items-center gap-1.5">
                             <i class="fa-solid fa-code text-indigo-400"></i>
-                            Nội dung câu lệnh (Prompt) <span class="text-rose-400">*</span>
+                            <span id="labelPromptContent">Nội dung câu lệnh (Prompt)</span> <span class="text-rose-400">*</span>
                         </span>
-                        <span class="text-[11px] text-slate-400 font-normal">JSON sẽ tự sinh Dynamic Form</span>
+                        <div class="flex items-center gap-2">
+                            <button type="button" id="btnExtractJsonFromUpload" onclick="extractJsonFromNewUploadedImage()"
+                                    class="hidden px-2.5 py-1 rounded-lg bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-500 hover:to-purple-500 text-white font-medium text-[11px] shadow-sm flex items-center gap-1.5 transition active:scale-95 shadow-indigo-500/20"
+                                    title="Dùng AI phân tích ảnh vừa tải lên để lấy JSON VisionStruct và điền vào đây">
+                                <i class="fa-solid fa-wand-magic-sparkles text-[10px]"></i>
+                                <span>Lấy json từ ảnh vừa tải lên</span>
+                            </button>
+                            <span id="promptJsonNotice" class="text-[11px] text-slate-400 font-normal">JSON sẽ tự sinh Dynamic Form</span>
+                        </div>
                     </label>
                     <textarea id="newPromptInput" rows="8" required
                               placeholder='Nhập câu lệnh dạng JSON hoặc Text tự do...&#10;&#10;Ví dụ JSON:&#10;{&#10;  "type": "Chân dung KOC",&#10;  "subject": "Cô gái Việt Nam 22 tuổi nụ cười rạng rỡ",&#10;  "clothing": "Áo dài truyền thống",&#10;  "lighting": "Cinematic soft light",&#10;  "camera": "Canon EOS R5, 85mm f/1.4"&#10;}'
@@ -1376,6 +1475,174 @@
                         <span id="btnSubmitGenerateText">Tạo ảnh ngay</span>
                     </button>
                 </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal: Tạo Video với AI (Phân cảnh & Render theo từng Scene) -->
+    <div id="generateVideoModal" class="fixed inset-0 z-50 bg-black/85 backdrop-blur-md hidden flex items-center justify-center p-3 sm:p-4 overflow-y-auto">
+        <div class="bg-dark-800 border border-dark-700 rounded-2xl w-full max-w-4xl xl:max-w-5xl my-auto overflow-hidden shadow-2xl animate-fade-in flex flex-col max-h-[94vh]">
+
+            <!-- Modal Header -->
+            <div class="px-6 py-4 border-b border-dark-700 flex items-center justify-between bg-dark-850 flex-shrink-0">
+                <div class="flex items-center space-x-3">
+                    <div class="w-9 h-9 rounded-xl bg-gradient-to-tr from-rose-600 via-pink-600 to-purple-600 text-white flex items-center justify-center shadow-lg shadow-rose-600/30">
+                        <i class="fa-solid fa-film text-sm"></i>
+                    </div>
+                    <div>
+                        <h3 class="font-bold text-white text-base flex items-center gap-2">
+                            <span>Tạo Video với AI từ kịch bản phân cảnh</span>
+                            <span id="genVideoPromptBadge" class="text-[11px] font-mono px-2 py-0.5 rounded bg-dark-700 text-rose-400 border border-rose-500/30">#VIDEO</span>
+                        </h3>
+                    </div>
+                </div>
+                <button onclick="closeGenerateVideoModal()" class="w-8 h-8 rounded-lg text-slate-400 hover:text-white hover:bg-dark-700 flex items-center justify-center transition">
+                    <i class="fa-solid fa-xmark text-base"></i>
+                </button>
+            </div>
+
+            <!-- Modal Content (Scrollable) -->
+            <div class="p-5 sm:p-6 space-y-5 overflow-y-auto flex-1">
+
+                <!-- Row 1: Model Selector (Left) & Ratio (Right) -->
+                <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <!-- Left: Model Selector -->
+                    <div class="p-3 bg-dark-900/60 rounded-xl border border-dark-700 space-y-1.5">
+                        <div class="flex items-center justify-between">
+                            <label for="genVideoModelSelect" class="text-xs font-semibold text-slate-200 flex items-center gap-1.5">
+                                <i class="fa-solid fa-wand-magic-sparkles text-rose-400"></i>
+                                <span>Mô hình AI Video (Model)</span>
+                            </label>
+                            <span id="genVideoModelBadge" class="text-[10px] font-mono px-2 py-0.5 rounded bg-rose-500/10 text-rose-300 border border-rose-500/30">8 models</span>
+                        </div>
+                        <select id="genVideoModelSelect"
+                                class="w-full px-3 py-2 bg-dark-900 text-slate-200 text-xs rounded-xl border border-dark-700 focus:outline-none focus:border-rose-500 transition cursor-pointer font-mono">
+                            <option value="kling-2.0" selected>Kling AI 2.0 (Cinematic HD)</option>
+                            <option value="kling-1.5">Kling AI 1.5 Pro</option>
+                            <option value="hailuo-minimax">Hailuo MiniMax (Diễn xuất tự nhiên)</option>
+                            <option value="sora-v1">OpenAI Sora v1</option>
+                            <option value="runway-gen3">Runway Gen-3 Alpha</option>
+                            <option value="luma-ray2">Luma Ray 2</option>
+                            <option value="seedance-video">Seedance Video AI</option>
+                            <option value="pika-2.0">Pika 2.0</option>
+                        </select>
+                    </div>
+
+                    <!-- Right: Ratio Selector (Dọc 9:16 / Ngang 16:9) -->
+                    <div class="p-3 bg-dark-900/60 rounded-xl border border-dark-700 space-y-1.5">
+                        <label class="text-xs font-semibold text-slate-200 flex items-center gap-1.5">
+                            <i class="fa-solid fa-crop-simple text-rose-400"></i>
+                            <span>Kích thước khung hình</span>
+                        </label>
+                        <div class="flex items-center gap-2">
+                            <button type="button" onclick="setVideoRatio('9:16')" id="btnRatioPortrait"
+                                    class="flex-1 py-2 px-3 rounded-lg text-xs font-semibold transition flex items-center justify-center gap-1.5 bg-rose-600 text-white shadow-md shadow-rose-600/25">
+                                <i class="fa-solid fa-mobile-screen text-[11px]"></i>
+                                <span>Dọc 9:16 (TikTok / Reels)</span>
+                            </button>
+                            <button type="button" onclick="setVideoRatio('16:9')" id="btnRatioLandscape"
+                                    class="flex-1 py-2 px-3 rounded-lg text-xs font-medium transition flex items-center justify-center gap-1.5 bg-dark-800 text-slate-400 hover:text-white border border-dark-700 hover:bg-dark-700">
+                                <i class="fa-solid fa-display text-[11px]"></i>
+                                <span>Ngang 16:9 (YouTube)</span>
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Row 2: Prompt bên trái & Tham chiếu bên phải -->
+                <div class="grid grid-cols-1 lg:grid-cols-2 gap-4 items-start">
+                    <!-- Left: Prompt Text -->
+                    <div class="space-y-1.5">
+                        <div class="flex items-center justify-between">
+                            <label for="genVideoPromptText" class="text-xs font-semibold text-slate-200 flex items-center gap-1.5">
+                                <i class="fa-solid fa-code text-indigo-400"></i>
+                                <span>Câu lệnh Prompt chung / Kịch bản</span>
+                            </label>
+                            <span class="text-[11px] text-slate-400">Kịch bản tổng</span>
+                        </div>
+                        <textarea id="genVideoPromptText" rows="6"
+                                  class="w-full px-3.5 py-2.5 bg-dark-900 text-slate-100 text-xs font-mono rounded-xl border border-dark-700 focus:outline-none focus:border-rose-500 focus:ring-1 focus:ring-rose-500 placeholder-slate-600 transition leading-relaxed min-h-[160px]"
+                                  placeholder="Nội dung kịch bản tổng thể..."></textarea>
+                    </div>
+
+                    <!-- Right: Tham chiếu (Ảnh / Video tham chiếu) -->
+                    <div class="space-y-1.5">
+                        <div class="flex items-center justify-between">
+                            <label class="text-xs font-semibold text-slate-200 flex items-center gap-1.5">
+                                <i class="fa-solid fa-photo-film text-purple-400"></i>
+                                <span>Tư liệu tham chiếu (Reference)</span>
+                            </label>
+                            <div class="inline-flex p-0.5 bg-dark-900 rounded-lg border border-dark-700 text-[11px]">
+                                <button type="button" id="btnVideoRefTabUpload" onclick="switchVideoRefTab('upload')"
+                                        class="px-2.5 py-1 rounded-md font-medium transition flex items-center gap-1 bg-purple-600 text-white shadow">
+                                    <i class="fa-solid fa-cloud-arrow-up text-[10px]"></i>
+                                    <span>Tải lên</span>
+                                </button>
+                                <button type="button" id="btnVideoRefTabExisting" onclick="switchVideoRefTab('existing')"
+                                        class="px-2.5 py-1 rounded-md text-slate-400 hover:text-white transition flex items-center gap-1">
+                                    <i class="fa-solid fa-images text-[10px]"></i>
+                                    <span>Từ mẫu có sẵn</span>
+                                </button>
+                            </div>
+                        </div>
+
+                        <!-- Mode 1: Upload Reference (File dropzone) -->
+                        <div id="videoRefUploadSection" class="space-y-2">
+                            <input type="file" id="genVideoRefFileInput" accept="image/*,video/*" class="hidden" onchange="handleGenVideoRefUpload(event)">
+                            <div id="videoRefDropzone" onclick="document.getElementById('genVideoRefFileInput').click()"
+                                 class="border-2 border-dashed border-dark-700 hover:border-purple-500/70 bg-dark-900/60 hover:bg-dark-900 rounded-xl p-4 text-center cursor-pointer transition flex flex-col items-center justify-center gap-1.5 min-h-[160px]">
+                                <div class="w-9 h-9 rounded-xl bg-dark-800 text-slate-400 flex items-center justify-center border border-dark-700">
+                                    <i class="fa-solid fa-cloud-arrow-up text-sm"></i>
+                                </div>
+                                <span class="text-xs text-slate-300 font-medium">Nhấp chọn ảnh/video tham chiếu khuôn mặt, dáng vóc</span>
+                                <span class="text-[11px] text-slate-500">Hỗ trợ JPG, PNG, MP4 (Tối đa 50MB)</span>
+                            </div>
+                            <div id="videoRefPreview" class="hidden relative rounded-xl overflow-hidden bg-dark-900 border border-dark-700 p-2 flex items-center gap-3">
+                                <img id="videoRefPreviewImg" src="" class="w-16 h-16 rounded-lg object-cover bg-dark-800 border border-dark-700">
+                                <div class="flex-1 min-w-0">
+                                    <p id="videoRefPreviewName" class="text-xs font-semibold text-slate-200 truncate">reference.jpg</p>
+                                    <p class="text-[11px] text-emerald-400">Đã nạp làm tham chiếu nhân vật</p>
+                                </div>
+                                <button type="button" onclick="clearGenVideoRef()" class="p-2 text-rose-400 hover:text-rose-300 transition">
+                                    <i class="fa-solid fa-xmark"></i>
+                                </button>
+                            </div>
+                        </div>
+
+                        <!-- Mode 2: Existing Samples List -->
+                        <div id="videoRefExistingSection" class="hidden space-y-2 min-h-[160px] p-3 rounded-xl bg-dark-900/60 border border-dark-700">
+                            <p class="text-[11px] text-slate-400">Nhấp chọn một ảnh/video mẫu làm nguồn tham chiếu:</p>
+                            <div id="videoRefExistingThumbs" class="grid grid-cols-4 sm:grid-cols-6 gap-2 max-h-[120px] overflow-y-auto"></div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Row 3: Scenes List Container (Tự động detect & hiển thị từng Scene) -->
+                <div class="space-y-3 pt-2 border-t border-dark-700/80">
+                    <div class="flex items-center justify-between">
+                        <div class="flex items-center gap-2">
+                            <i class="fa-solid fa-clapperboard text-rose-400 text-sm"></i>
+                            <h4 class="text-sm font-bold text-white">Danh sách phân cảnh kịch bản</h4>
+                            <span id="genVideoScenesCountBadge" class="text-[11px] font-mono px-2 py-0.5 rounded bg-rose-500/15 text-rose-300 border border-rose-500/30">0 scenes</span>
+                        </div>
+                        <span class="text-xs text-slate-400">Mỗi cảnh có thể tinh chỉnh và render độc lập</span>
+                    </div>
+
+                    <!-- Scenes Cards Injected by JS -->
+                    <div id="genVideoScenesContainer" class="space-y-4"></div>
+                </div>
+
+            </div>
+
+            <!-- Modal Footer (Không còn nút Tạo ảnh ngay chung, chỉ có nút Đóng) -->
+            <div class="px-6 py-4 border-t border-dark-700 bg-dark-850 flex items-center justify-between gap-3 flex-shrink-0">
+                <span class="text-xs text-slate-400">
+                    <i class="fa-solid fa-circle-info text-rose-400 mr-1"></i> Bấm "Render cảnh này" tại từng phân cảnh ở trên để tạo video.
+                </span>
+                <button type="button" onclick="closeGenerateVideoModal()"
+                        class="px-5 py-2.5 rounded-xl bg-dark-700 hover:bg-dark-600 text-slate-200 text-xs font-semibold transition active:scale-95">
+                    Đóng
+                </button>
             </div>
         </div>
     </div>

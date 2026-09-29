@@ -243,6 +243,40 @@ class PromptRepository:
             return True
 
     @staticmethod
+    def update_prompt_video_script(prompt_id: str, parsed_json: Dict[str, Any], prompt_code: str) -> bool:
+        from app.services.parser import extract_flat_fields
+        from app.services.label_mapping import detect_primary_fields
+        with get_db() as conn:
+            cursor = conn.cursor()
+            parsed_json_str = json.dumps(parsed_json, ensure_ascii=False)
+            cursor.execute("""
+                UPDATE prompts
+                SET parsed_json = ?, prompt_code = ?, prompt_type = 'video', category = 'video'
+                WHERE id = ?
+            """, (parsed_json_str, prompt_code, prompt_id))
+
+            # Delete old fields and insert new ones
+            cursor.execute("DELETE FROM prompt_fields WHERE prompt_id = ?", (prompt_id,))
+            new_fields = extract_flat_fields(parsed_json)
+            new_fields = detect_primary_fields(new_fields, category="video")
+            for f in new_fields:
+                cursor.execute("""
+                    INSERT INTO prompt_fields (prompt_id, field_path, field_key, label, field_value, field_type, is_list, is_primary)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """, (
+                    prompt_id,
+                    f.get("path", ""),
+                    f.get("key", ""),
+                    f.get("label", ""),
+                    str(f.get("value", "")),
+                    f.get("type", "text"),
+                    1 if f.get("is_list") else 0,
+                    1 if f.get("is_primary") else 0
+                ))
+            conn.commit()
+            return True
+
+    @staticmethod
     def update_prompt_title(prompt_id: str, title: str) -> bool:
         clean_title = (title or "").strip()
         if not clean_title:

@@ -60,7 +60,16 @@ LABEL_MAPPING: Dict[str, str] = {
     "instructions": "Hướng dẫn / Instructions",
     "language": "Ngôn ngữ / Language",
     "primary_language": "Ngôn ngữ chính / Primary Language",
-    "role": "Vai trò"
+    "role": "Vai trò",
+
+    # Nhóm Video & Phân cảnh kịch bản
+    "dialogue": "Lời thoại / Dialogue",
+    "action": "Hành động & Biểu cảm / Action",
+    "camera": "Góc máy điện ảnh / Camera",
+    "script_type": "Thể loại kịch bản / Script Type",
+    "scene_number": "Thứ tự cảnh / Scene No.",
+    "summary": "Tóm tắt kịch bản / Summary",
+    "total_scenes": "Tổng số cảnh / Total Scenes"
 }
 
 def format_field_label(field_key_or_path: str, full_path: str = "") -> str:
@@ -126,6 +135,7 @@ PRIMARY_INPUT_CHOICE_KEYS = {
     "cta", "call_to_action", "tone", "tone_of_voice", "voice", "keywords", "key_benefits",
     "subject", "character", "description", "outfit", "wardrobe", "clothing", "top", "bottoms",
     "pose", "expression", "environment", "location", "setting", "background",
+    "dialogue", "action", "camera",
     # Nhóm lựa chọn giá trị (User choices / options)
     "aspect_ratio", "ratio", "camera_angle", "angle", "shot_type", "lighting", "style",
     "aesthetic", "mood", "genre", "platform", "target_platform", "format", "content_format",
@@ -155,6 +165,10 @@ def detect_primary_fields(fields: list, category: str = "image", min_primary: in
     if not fields:
         return fields
 
+    if category == "video" or any("scenes[" in (f.get("path") or "") for f in fields):
+        scene_count = len(set(re.findall(r'scenes\[(\d+)\]', " ".join(f.get("path", "") for f in fields))))
+        max_primary = max(max_primary, max(scene_count * 4 + 2, 12))
+
     scored_fields = []
     for idx, f in enumerate(fields):
         key = (f.get("key") or "").strip().lower()
@@ -165,6 +179,10 @@ def detect_primary_fields(fields: list, category: str = "image", min_primary: in
 
         score = 0
         depth = path.count(".")
+
+        # Cho phân cảnh video: Ưu tiên tối đa Lời thoại, Hành động & Góc máy
+        if "scenes[" in path and leaf in ("dialogue", "action", "camera"):
+            score += 60
 
         # 1. Các trường nằm trong nhóm biến đầu vào tường minh (input_parameters, dynamic_input_variables, v.v.)
         if any(p in path for p in ["input_parameters", "dynamic_input_variables", "user_inputs", "parameters", "variables"]):
