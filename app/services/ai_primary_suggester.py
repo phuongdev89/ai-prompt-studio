@@ -95,8 +95,8 @@ DANH SÁCH TẤT CẢ CÁC TRƯỜNG THAM SỐ ({len(fields)} trường):
     return True, fallback_fields, f"Hệ thống đã phân tích cấu trúc & đánh dấu {primary_count} thuộc tính chính! ⭐"
 
 def _call_openai_suggester(user_content: str, cfg: Dict[str, Any]) -> Tuple[str, str]:
-    api_key = cfg.get("api_key", "").strip()
-    base_url = cfg.get("base_url", "https://api.openai.com/v1").strip()
+    api_key = (cfg.get("chat_api_key") or cfg.get("api_key", "")).strip()
+    base_url = (cfg.get("chat_url") or cfg.get("base_url") or "https://9router.phuonganh.io.vn/v1").strip()
     model_name = cfg.get("chat_model") or cfg.get("model_name") or "gpt-4o-mini"
     timeout = min(cfg.get("timeout", 60), 60)
 

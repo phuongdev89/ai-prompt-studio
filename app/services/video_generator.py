@@ -83,7 +83,7 @@ def call_ai_generate_video(
     Trả về: (success: bool, video_url: Optional[str], format_type: str, message: str)
     """
     cfg = get_ai_config()
-    api_key = cfg.get("api_key", "").strip()
+    api_key = cfg.get("video_api_key") or cfg.get("api_key", "").strip()
     base_url = (cfg.get("base_url") or "https://api.openai.com/v1").rstrip("/")
     timeout = cfg.get("timeout", 300)
 

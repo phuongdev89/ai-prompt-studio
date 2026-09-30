@@ -5331,7 +5331,7 @@ async function submitGenerateImage() {
     }, 1000);
 
     try {
-        const response = await fetch(`/api/prompts/${currentPromptId}/generate-image`, {
+        const response = await fetch(`/api/prompts/${currentPromptId}/generate-image-stream`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
@@ -5346,31 +5346,68 @@ async function submitGenerateImage() {
             })
         });
 
-        const responseText = await response.text();
-        let data;
-        try {
-            data = JSON.parse(responseText);
-        } catch (_) {
-            throw new Error(responseText.trim() || ('Server trả về dữ liệu không hợp lệ (HTTP ' + response.status + ')'));
-        }
         if (!response.ok) {
-            throw new Error(data.detail || data.message || ('Lỗi server HTTP ' + response.status));
+            const responseText = await response.text();
+            let errData;
+            try { errData = JSON.parse(responseText); } catch (_) {}
+            throw new Error(errData?.detail || errData?.message || ('Lỗi server HTTP ' + response.status));
         }
 
-        currentGeneratedImageData = data.image_url;
+        // Đọc SSE stream realtime
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder('utf-8');
+        let buffer = '';
+        let receivedImage = false;
 
-        // Display result
-        const resultImg = document.getElementById('genResultImg');
-        resultImg.src = data.image_url;
+        while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
 
-        const formatBadge = document.getElementById('genResultFormatBadge');
-        if (formatBadge) {
-            formatBadge.innerText = (data.format || 'IMAGE').toUpperCase();
+            buffer += decoder.decode(value, { stream: true });
+            const lines = buffer.split('\n');
+            buffer = lines.pop() || '';
+
+            for (const line of lines) {
+                const trimmed = line.trim();
+                if (!trimmed.startsWith('data:')) continue;
+                const dataStr = trimmed.slice(5).trim();
+                if (!dataStr || dataStr === '[DONE]') continue;
+
+                let evt;
+                try {
+                    evt = JSON.parse(dataStr);
+                } catch (_) {
+                    continue;
+                }
+
+                if (evt.type === 'status') {
+                    if (timerEl) {
+                        timerEl.innerText = `${evt.message} (${genTimerSeconds}s)...`;
+                    }
+                } else if (evt.type === 'complete' && evt.image_url) {
+                    receivedImage = true;
+                    currentGeneratedImageData = evt.image_url;
+
+                    const resultImg = document.getElementById('genResultImg');
+                    if (resultImg) resultImg.src = evt.image_url;
+
+                    const formatBadge = document.getElementById('genResultFormatBadge');
+                    if (formatBadge) {
+                        formatBadge.innerText = (evt.format || 'IMAGE').toUpperCase();
+                    }
+
+                    const noteEl = document.getElementById('genResultNote');
+                    if (noteEl) {
+                        noteEl.innerText = evt.message || 'Tạo ảnh thành công từ AI';
+                    }
+                } else if (evt.type === 'error') {
+                    throw new Error(evt.message || 'Lỗi từ mô hình AI');
+                }
+            }
         }
 
-        const noteEl = document.getElementById('genResultNote');
-        if (noteEl) {
-            noteEl.innerText = data.message || 'Tạo ảnh thành công từ AI';
+        if (!receivedImage) {
+            throw new Error('Mô hình AI không trả về ảnh kết quả');
         }
 
         // Reset save button state

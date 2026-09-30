@@ -37,8 +37,8 @@ def call_ai_generate_content(
 
 
 def _call_openai_content(user_content: str, cfg: Dict[str, Any]) -> Tuple[bool, str, str]:
-    api_key = cfg.get("api_key", "").strip()
-    base_url = cfg.get("base_url", "https://api.openai.com/v1").strip()
+    api_key = (cfg.get("chat_api_key") or cfg.get("api_key", "")).strip()
+    base_url = (cfg.get("chat_url") or cfg.get("base_url") or "https://9router.phuonganh.io.vn/v1").strip()
     model_name = cfg.get("chat_model") or cfg.get("model_name") or "gpt-4o-mini"
     timeout = cfg.get("timeout", 180)
 

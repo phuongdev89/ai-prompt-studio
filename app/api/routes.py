@@ -898,7 +898,6 @@ def suggest_prompt_title(prompt_id: str):
         raise HTTPException(status_code=500, detail=f"Lỗi AI gợi ý tiêu đề: {str(e)}")
 
 @router.post("/prompts/{prompt_id}/generate-image")
-
 def generate_image_for_prompt(prompt_id: str, payload: GenerateImageRequest):
     from app.services.image_generator import call_ai_generate_image
     prompt = PromptRepository.get_prompt_by_id(prompt_id)
@@ -933,6 +932,47 @@ def generate_image_for_prompt(prompt_id: str, payload: GenerateImageRequest):
         "message": msg,
         "prompt_id": prompt_id
     }
+
+@router.post("/prompts/{prompt_id}/generate-image-stream")
+def generate_image_stream_endpoint(prompt_id: str, payload: GenerateImageRequest):
+    from app.services.image_generator import call_ai_generate_image_stream
+    from fastapi.responses import StreamingResponse
+    import json
+
+    prompt = PromptRepository.get_prompt_by_id(prompt_id)
+    if not prompt:
+        raise HTTPException(status_code=404, detail="Prompt không tồn tại")
+
+    prompt_text = payload.prompt.strip() if payload.prompt else ""
+    if not prompt_text:
+        prompt_text = prompt.get("prompt_code") or prompt.get("raw_content") or ""
+
+    if not prompt_text.strip():
+        raise HTTPException(status_code=400, detail="Câu lệnh prompt không được để trống")
+
+    def sse_event_generator():
+        for event in call_ai_generate_image_stream(
+            prompt_text=prompt_text,
+            reference_image=payload.reference_image,
+            extra_description=payload.extra_description,
+            size=payload.size or "1024x1024",
+            quality=payload.quality or "hd",
+            image_detail=payload.image_detail or "high",
+            provider=payload.provider,
+            model=payload.model
+        ):
+            yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
+        yield "data: [DONE]\n\n"
+
+    return StreamingResponse(
+        sse_event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no"
+        }
+    )
 
 @router.post("/prompts/{prompt_id}/save-generated-image")
 def save_generated_image_endpoint(prompt_id: str, payload: SaveGeneratedImageRequest):

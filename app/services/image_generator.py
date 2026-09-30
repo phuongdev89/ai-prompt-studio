@@ -108,6 +108,67 @@ def extract_image_from_text(text: str) -> Optional[Tuple[str, str]]:
 
     return None
 
+def fetch_url_to_base64(url: str, timeout: int = 30) -> Optional[str]:
+    """Tải ảnh từ URL (kể cả localhost từ upstream) và chuyển thành base64 data URL."""
+    try:
+        ctx = ssl.create_default_context()
+        ctx.check_hostname = False
+        ctx.verify_mode = ssl.CERT_NONE
+        req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+        with urllib.request.urlopen(req, timeout=timeout, context=ctx) as resp:
+            data = resp.read()
+            mime = resp.headers.get_content_type() or "image/png"
+            b64 = base64.b64encode(data).decode("utf-8")
+            return f"data:{mime};base64,{b64}"
+    except Exception:
+        return None
+
+
+def robust_json_loads(s: str) -> Optional[Any]:
+    """
+    Parse JSON an toàn tuyệt đối, chịu lỗi tốt với dấu nháy đơn ('), dấu ngoặc đơn,
+    dấu phẩy thừa và văn bản lồng ghép để không bao giờ bị cắt cụt prompt.
+    """
+    if not s or not isinstance(s, str):
+        return None
+    s_trimmed = s.strip()
+
+    # 1. Parse JSON chuẩn trực tiếp
+    try:
+        return json.loads(s_trimmed)
+    except Exception:
+        pass
+
+    # 2. Tìm khối JSON { ... } hoặc [ ... ] lớn nhất nếu có text thừa bên ngoài
+    brace_start = s_trimmed.find("{")
+    brace_end = s_trimmed.rfind("}")
+    if brace_start != -1 and brace_end > brace_start:
+        candidate = s_trimmed[brace_start:brace_end + 1]
+        try:
+            return json.loads(candidate)
+        except Exception:
+            pass
+
+        # 3. Thử sửa dấu ngoặc đơn thành ngoặc kép an toàn bằng ast.literal_eval
+        try:
+            import ast
+            val = ast.literal_eval(candidate)
+            if isinstance(val, (dict, list)):
+                return val
+        except Exception:
+            pass
+
+        # 4. Thay thế regex các trường hợp key/value dùng nháy đơn
+        try:
+            fixed = re.sub(r"(?<=\{|\,)\s*\'([a-zA-Z0-9_\-\.]+)\'\s*:", r' "\1":', candidate)
+            fixed = re.sub(r",\s*([\}\]])", r"\1", fixed)
+            return json.loads(fixed)
+        except Exception:
+            pass
+
+    return None
+
+
 def call_openai_images_generations(
     base_url: str, api_key: str, model_name: str, prompt: str, timeout: int,
     reference_image: Optional[str] = None, image_detail: str = "high",
@@ -123,6 +184,8 @@ def call_openai_images_generations(
         "model": model_name, "prompt": prompt, "n": 1,
         "size": "auto", "quality": "auto", "background": "auto",
         "image_detail": image_detail or "high", "output_format": "png",
+        "response_format": "b64_json",
+        "stream": True,
     }
     if reference_image:
         payload["image"] = reference_image
@@ -130,7 +193,8 @@ def call_openai_images_generations(
     ctx.check_hostname = False
     ctx.verify_mode = ssl.CERT_NONE
     try:
-        req = urllib.request.Request(endpoint, data=json.dumps(payload).encode("utf-8"), headers=headers)
+        req_data = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+        req = urllib.request.Request(endpoint, data=req_data, headers=headers)
         with urllib.request.urlopen(req, timeout=timeout, context=ctx) as resp:
             body = resp.read().decode("utf-8", errors="ignore")
         candidates = [body] + [
@@ -138,9 +202,8 @@ def call_openai_images_generations(
             if line.startswith("data:") and line[5:].strip() not in ("", "[DONE]")
         ]
         for candidate in reversed(candidates):
-            try:
-                data = json.loads(candidate)
-            except (TypeError, json.JSONDecodeError):
+            data = robust_json_loads(candidate)
+            if not data:
                 extracted = extract_image_from_text(candidate)
                 if extracted:
                     return extracted[0]
@@ -159,6 +222,137 @@ def call_openai_images_generations(
     return None
 
 
+def stream_openai_images_generations(
+    base_url: str, api_key: str, model_name: str, prompt: str, timeout: int,
+    reference_image: Optional[str] = None, image_detail: str = "high",
+):
+    """Gọi endpoint upstream qua SSE và yield trạng thái theo thời gian thực."""
+    endpoint = f"{base_url.rstrip('/')}/images/generations"
+    headers = {
+        "Content-Type": "application/json",
+        "Authorization": f"Bearer {api_key}",
+        "Accept": "text/event-stream",
+    }
+    payload = {
+        "model": model_name, "prompt": prompt, "n": 1,
+        "size": "auto", "quality": "auto", "background": "auto",
+        "image_detail": image_detail or "high", "output_format": "png",
+        "response_format": "b64_json",
+        "stream": True,
+    }
+    if reference_image:
+        payload["image"] = reference_image
+
+    ctx = ssl.create_default_context()
+    ctx.check_hostname = False
+    ctx.verify_mode = ssl.CERT_NONE
+
+    yield {"type": "status", "message": f"Đang gửi yêu cầu tới mô hình {model_name}..."}
+
+    try:
+        req_data = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+        req = urllib.request.Request(endpoint, data=req_data, headers=headers)
+        with urllib.request.urlopen(req, timeout=timeout, context=ctx) as resp:
+            yield {"type": "status", "message": f"Mô hình {model_name} đã nhận yêu cầu, đang xử lý..."}
+            has_image = False
+            for raw_line in resp:
+                line = raw_line.decode("utf-8", errors="ignore").strip()
+                if not line:
+                    continue
+
+                data_str = line[5:].strip() if line.startswith("data:") else line
+                if data_str == "[DONE]":
+                    break
+                if not data_str:
+                    continue
+
+                parsed = robust_json_loads(data_str)
+                if isinstance(parsed, dict):
+                    if "error" in parsed:
+                        err_obj = parsed["error"]
+                        err_msg = err_obj.get("message") if isinstance(err_obj, dict) else str(err_obj)
+                        yield {"type": "error", "message": f"Lỗi upstream: {err_msg}"}
+                        return
+
+                    img_candidate = None
+                    if "data" in parsed and isinstance(parsed["data"], list) and len(parsed["data"]) > 0:
+                        first = parsed["data"][0]
+                        if isinstance(first, dict):
+                            if first.get("b64_json"):
+                                img_candidate = f"data:image/png;base64,{first['b64_json']}"
+                            elif first.get("url"):
+                                img_candidate = first["url"]
+
+                    if not img_candidate:
+                        if parsed.get("url"):
+                            img_candidate = parsed["url"]
+                        elif parsed.get("image_url"):
+                            img_candidate = parsed["image_url"]
+                        elif parsed.get("image") and isinstance(parsed["image"], str):
+                            img_candidate = parsed["image"]
+                        elif parsed.get("b64_json"):
+                            img_candidate = f"data:image/png;base64,{parsed['b64_json']}"
+
+                    if img_candidate:
+                        has_image = True
+                        if img_candidate.startswith("http://") or img_candidate.startswith("https://"):
+                            yield {"type": "status", "message": "Đang chuyển ảnh kết quả sang định dạng Base64..."}
+                            b64 = fetch_url_to_base64(img_candidate)
+                            if b64:
+                                img_candidate = b64
+
+                        fmt = "base64" if img_candidate.startswith("data:image/") else "url"
+                        yield {
+                            "type": "complete",
+                            "image_url": img_candidate,
+                            "format": fmt,
+                            "message": f"Sinh ảnh thành công bằng {model_name}"
+                        }
+                        return
+
+                    # Trạng thái tiến trình từ upstream
+                    status_text = parsed.get("status") or parsed.get("message") or parsed.get("progress")
+                    if status_text:
+                        yield {"type": "status", "message": f"Tiến trình: {status_text}"}
+                    elif "step" in parsed:
+                        yield {"type": "status", "message": f"Bước: {parsed.get('step')}"}
+                else:
+                    # Trích xuất ảnh nếu là text dạng SVG hoặc URL
+                    extracted = extract_image_from_text(data_str)
+                    if extracted:
+                        has_image = True
+                        img_res = extracted[0]
+                        if img_res.startswith("http://") or img_res.startswith("https://"):
+                            yield {"type": "status", "message": "Đang chuyển ảnh kết quả sang định dạng Base64..."}
+                            b64 = fetch_url_to_base64(img_res)
+                            if b64:
+                                img_res = b64
+                        fmt = "base64" if img_res.startswith("data:image/") else "url"
+                        yield {
+                            "type": "complete",
+                            "image_url": img_res,
+                            "format": fmt,
+                            "message": f"Sinh ảnh thành công bằng {model_name}"
+                        }
+                        return
+
+            if not has_image:
+                yield {"type": "error", "message": "API không trả về ảnh hợp lệ"}
+
+    except urllib.error.HTTPError as e:
+        err_body = e.read().decode("utf-8", errors="ignore")
+        parsed_err = robust_json_loads(err_body)
+        msg = f"HTTP {e.code}"
+        if isinstance(parsed_err, dict) and "error" in parsed_err:
+            err_obj = parsed_err["error"]
+            msg = err_obj.get("message") if isinstance(err_obj, dict) else str(err_obj)
+        elif err_body:
+            msg = err_body[:300]
+        yield {"type": "error", "message": f"Lỗi upstream ({e.code}): {msg}"}
+    except Exception as e:
+        yield {"type": "error", "message": f"Lỗi kết nối mô hình AI: {str(e)}"}
+
+
 def sanitize_prompt_for_image_generation(prompt_str: str) -> str:
     """
     Sanitizes prompt text or JSON string before sending to image generation API.
@@ -167,21 +361,56 @@ def sanitize_prompt_for_image_generation(prompt_str: str) -> str:
     reject requests with 'Vui lòng tải lên ảnh tham chiếu...'.
     """
     if not prompt_str or not isinstance(prompt_str, str):
-        return prompt_str
+        return prompt_str or ""
 
-    stripped = prompt_str.strip()
-    if (stripped.startswith("{") and stripped.endswith("}")) or (stripped.startswith("[") and stripped.endswith("]")):
+    parsed = robust_json_loads(prompt_str)
+    if isinstance(parsed, dict):
         try:
-            parsed = json.loads(stripped)
-            if isinstance(parsed, dict):
-                from app.services.ai_converter import normalize_reference_image_in_json
-                normalized, _ = normalize_reference_image_in_json(parsed)
-                return json.dumps(normalized, ensure_ascii=False, indent=2)
+            from app.services.ai_converter import normalize_reference_image_in_json
+            normalized, _ = normalize_reference_image_in_json(parsed)
+            return json.dumps(normalized, ensure_ascii=False, indent=2)
         except Exception:
             pass
 
     from app.services.ai_converter import sanitize_text_reference_images
     return sanitize_text_reference_images(prompt_str)
+
+
+def call_ai_generate_image_stream(
+    prompt_text: str, reference_image: Optional[str] = None,
+    extra_description: Optional[str] = None, size: str = "1024x1024",
+    quality: str = "hd", image_detail: str = "high",
+    provider: Optional[str] = None,
+    model: Optional[str] = None,
+):
+    """Stream các sự kiện tạo ảnh theo thời gian thực (SSE)."""
+    cfg = get_ai_config()
+    api_key = cfg.get("image_api_key") or cfg.get("api_key", "")
+    base_url = cfg.get("image_url") or cfg.get("base_url") or "https://9router.phuonganh.io.vn/v1"
+
+    available_models = cfg.get("image_models") or [cfg.get("image_model") or "cx/gpt-5.6-sol-image"]
+    model_name = model.strip() if (model and model.strip()) else available_models[0]
+
+    timeout = int(cfg.get("timeout", 300))
+    if not api_key:
+        yield {"type": "error", "message": "Chưa cấu hình API key trong .env (AI_IMAGE_KEY hoặc AI_API_KEY)"}
+        return
+
+    parts = [prompt_text.strip()]
+    if extra_description and extra_description.strip():
+        parts.append(f"[Yêu cầu phụ]: {extra_description.strip()}")
+    full_prompt = "\n\n".join(parts)
+    full_prompt = sanitize_prompt_for_image_generation(full_prompt)
+
+    yield from stream_openai_images_generations(
+        base_url=base_url,
+        api_key=api_key,
+        model_name=model_name,
+        prompt=full_prompt,
+        timeout=timeout,
+        reference_image=reference_image,
+        image_detail=image_detail,
+    )
 
 def call_ai_generate_image(
     prompt_text: str, reference_image: Optional[str] = None,
@@ -191,16 +420,16 @@ def call_ai_generate_image(
     model: Optional[str] = None,
 ) -> Tuple[bool, Optional[str], Optional[str], str]:
     cfg = get_ai_config()
-    api_key = cfg.get("api_key", "")
-    base_url = cfg.get("base_url") or "https://api.openai.com/v1"
-    
+    api_key = cfg.get("image_api_key") or cfg.get("api_key", "")
+    base_url = cfg.get("image_url") or cfg.get("base_url") or "https://9router.phuonganh.io.vn/v1"
+
     # Ưu tiên model được người dùng chọn từ dropdown, nếu không có lấy model mặc định đầu tiên
-    available_models = cfg.get("image_models") or [cfg.get("image_model") or "cx/gpt-image-2.5"]
+    available_models = cfg.get("image_models") or [cfg.get("image_model") or "cx/gpt-5.6-sol-image"]
     model_name = model.strip() if (model and model.strip()) else available_models[0]
-    
+
     timeout = int(cfg.get("timeout", 300))
     if not api_key:
-        return False, None, None, "Chưa cấu hình API key"
+        return False, None, None, "Chưa cấu hình API key (AI_IMAGE_KEY hoặc AI_API_KEY)"
     parts = [prompt_text.strip()]
     if extra_description and extra_description.strip():
         parts.append(f"[Yêu cầu phụ]: {extra_description.strip()}")
@@ -212,6 +441,10 @@ def call_ai_generate_image(
     )
     if not image_source:
         return False, None, None, "API tạo ảnh không trả về ảnh hợp lệ"
+    if image_source.startswith("http://") or image_source.startswith("https://"):
+        b64_img = fetch_url_to_base64(image_source)
+        if b64_img:
+            image_source = b64_img
     fmt = "base64" if image_source.startswith("data:image/") else "url"
     return True, image_source, fmt, f"Sinh ảnh thành công bằng {model_name}"
 

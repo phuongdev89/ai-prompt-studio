@@ -45,6 +45,12 @@ _DEFAULT_CONFIG = {
     "provider": "openai",
     "base_url": "https://api.openai.com/v1",
     "api_key": "",
+    "chat_url": "https://9router.phuonganh.io.vn/v1",
+    "chat_api_key": "",
+    "image_url": "https://9router.phuonganh.io.vn/v1",
+    "image_api_key": "",
+    "video_url": "https://api.zpro.io.vn/v1",
+    "video_api_key": "",
     "model": "gpt-4o-mini",
     "chat_model": "gpt-4o-mini",
     "image_model": "cx/gpt-5.6-sol-image",
@@ -67,6 +73,12 @@ _ENV_KEY_MAP = {
     "AI_PROVIDER": "provider",
     "AI_BASE_URL": "base_url",
     "AI_API_KEY": "api_key",
+    "AI_CHAT_URL": "chat_url",
+    "AI_CHAT_KEY": "chat_api_key",
+    "AI_IMAGE_URL": "image_url",
+    "AI_IMAGE_KEY": "image_api_key",
+    "AI_VIDEO_URL": "video_url",
+    "AI_VIDEO_KEY": "video_api_key",
     "AI_MODEL": "model",
     "AI_CHAT_MODEL": "chat_model",
     "AI_IMAGE_MODEL": "image_model",
@@ -127,56 +139,65 @@ def get_ai_config() -> dict:
     saved = _read_env_file()
     merged = {**_DEFAULT_CONFIG, **saved}
 
-    for k in ("provider", "base_url", "api_key", "model", "chat_model", "image_model", "video_model",
+    for k in ("provider", "base_url", "api_key", "chat_url", "chat_api_key",
+              "image_url", "image_api_key", "video_url", "video_api_key",
+              "model", "chat_model", "image_model", "video_model",
               "s3_endpoint_url", "s3_region", "s3_bucket", "s3_access_key_id",
               "s3_secret_access_key", "s3_key_prefix"):
         if isinstance(merged.get(k), str):
             merged[k] = merged[k].strip().strip('"').strip("'")
 
-    if merged.get("base_url"):
+    if merged.get("image_url"):
+        merged["image_url"] = merged["image_url"].rstrip("/")
+    if merged.get("chat_url"):
+        merged["chat_url"] = merged["chat_url"].rstrip("/")
+    if merged.get("video_url"):
+        merged["video_url"] = merged["video_url"].rstrip("/")
+
+    # Đồng bộ base_url và api_key ưu tiên theo image / chat
+    if merged.get("image_url"):
+        merged["base_url"] = merged["image_url"]
+    elif merged.get("chat_url"):
+        merged["base_url"] = merged["chat_url"]
+    elif merged.get("base_url"):
         merged["base_url"] = merged["base_url"].rstrip("/")
+
+    if not merged.get("api_key"):
+        merged["api_key"] = merged.get("image_api_key") or merged.get("chat_api_key") or ""
+
     if merged.get("s3_endpoint_url"):
         merged["s3_endpoint_url"] = merged["s3_endpoint_url"].rstrip("/")
 
-    if not merged.get("chat_model"):
-        merged["chat_model"] = merged.get("model", "gpt-4o-mini")
-    if not merged.get("image_model"):
-        merged["image_model"] = merged.get("chat_model") or merged.get("model", "gpt-4o-mini")
-    if not merged.get("video_model"):
-        merged["video_model"] = "zpro-payg/grok-imagine-video"
+    # Chat models
+    raw_chat = merged.get("chat_model") or merged.get("model") or "ag/gemini-3.8-flash-high"
+    merged["raw_chat_models"] = raw_chat
+    chat_models_list = [m.strip() for m in raw_chat.split(",") if m.strip()]
+    merged["chat_models"] = chat_models_list if chat_models_list else [raw_chat or "ag/gemini-3.8-flash-high"]
+    merged["default_chat_model"] = merged["chat_models"][0]
+    merged["chat_model"] = merged["default_chat_model"]
+    merged["model"] = merged["default_chat_model"]
+    merged["model_name"] = merged["default_chat_model"]
 
-    raw_img = merged.get("image_model") or ""
+    # Image models
+    raw_img = merged.get("image_model") or "cx/gpt-5.6-sol-image"
     merged["raw_image_models"] = raw_img
     models_list = [m.strip() for m in raw_img.split(",") if m.strip()]
-    merged["image_models"] = models_list if models_list else [raw_img or "cx/gpt-image-2.5"]
+    merged["image_models"] = models_list if models_list else [raw_img or "cx/gpt-5.6-sol-image"]
     merged["default_image_model"] = merged["image_models"][0]
-    # image_model trỏ vào model mặc định đầu tiên để các chỗ gọi trực tiếp không bị lỗi chuỗi gộp có dấu phẩy
     merged["image_model"] = merged["default_image_model"]
 
-    raw_vid = merged.get("video_model") or ""
+    # Video models
+    raw_vid = merged.get("video_model") or "grok-imagine-video"
     merged["raw_video_models"] = raw_vid
     vid_models_list = [m.strip() for m in raw_vid.split(",") if m.strip()]
-    merged["video_models"] = vid_models_list if vid_models_list else ["zpro-payg/grok-imagine-video"]
+    merged["video_models"] = vid_models_list if vid_models_list else ["zpro-payg/grok-imagine-video", "grok-imagine-video"]
     merged["default_video_model"] = merged["video_models"][0]
     merged["video_model"] = merged["default_video_model"]
 
-    merged["model_name"] = merged["chat_model"]
     return merged
 
 
-def get_image_models() -> list:
-    """Trả về danh sách tất cả các mô hình AI tạo ảnh được cấu hình trong .env."""
-    cfg = get_ai_config()
-    return cfg.get("image_models") or ["cx/gpt-image-2.5"]
-
-
-def get_video_models() -> list:
-    """Trả về danh sách tất cả các mô hình AI tạo video được cấu hình trong .env."""
-    cfg = get_ai_config()
-    return cfg.get("video_models") or ["zpro-payg/grok-imagine-video"]
-
-
-def save_ai_config(cfg: dict):
+def save_ai_config(new_config: dict) -> None:
     raise RuntimeError("Cấu hình chỉ được đọc từ file .env. Không thể sửa trên web.")
 
 
