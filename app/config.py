@@ -54,6 +54,7 @@ _DEFAULT_CONFIG = {
     "model": "gpt-4o-mini",
     "chat_model": "gpt-4o-mini",
     "image_model": "cx/gpt-5.6-sol-image",
+    "image_type": "edit",
     "video_model": "zpro-payg/grok-imagine-video",
     "image_reference_support": False,
     "timeout": 300,
@@ -82,6 +83,7 @@ _ENV_KEY_MAP = {
     "AI_MODEL": "model",
     "AI_CHAT_MODEL": "chat_model",
     "AI_IMAGE_MODEL": "image_model",
+    "AI_IMAGE_TYPE": "image_type",
     "AI_VIDEO_MODEL": "video_model",
     "AI_IMAGE_REFERENCE_SUPPORT": "image_reference_support",
     "AI_TIMEOUT": "timeout",
@@ -141,7 +143,7 @@ def get_ai_config() -> dict:
 
     for k in ("provider", "base_url", "api_key", "chat_url", "chat_api_key",
               "image_url", "image_api_key", "video_url", "video_api_key",
-              "model", "chat_model", "image_model", "video_model",
+              "model", "chat_model", "image_model", "image_type", "video_model",
               "s3_endpoint_url", "s3_region", "s3_bucket", "s3_access_key_id",
               "s3_secret_access_key", "s3_key_prefix"):
         if isinstance(merged.get(k), str):

@@ -169,26 +169,201 @@ def robust_json_loads(s: str) -> Optional[Any]:
     return None
 
 
+
+class BaseImageProvider:
+    """Base adapter for AI Image generation/editing providers."""
+
+    def __init__(self, base_url: str, api_key: str, model_name: str, timeout: int = 300):
+        self.base_url = (base_url or "").rstrip("/")
+        self.api_key = api_key or ""
+        self.model_name = model_name or ""
+        self.timeout = timeout
+
+    def get_endpoint(self) -> str:
+        raise NotImplementedError
+
+    def get_headers(self) -> Dict[str, str]:
+        return {
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {self.api_key}",
+            "Accept": "text/event-stream",
+        }
+
+    def prepare_prompt(self, prompt: str) -> str:
+        return prompt
+
+    def build_payload(self, prompt: str, reference_image: Optional[str] = None, image_detail: str = "high") -> Dict[str, Any]:
+        raise NotImplementedError
+
+    def extract_image_from_parsed(self, parsed: Any) -> Optional[str]:
+        if not isinstance(parsed, dict):
+            return None
+        if "data" in parsed and isinstance(parsed["data"], list) and len(parsed["data"]) > 0:
+            first = parsed["data"][0]
+            if isinstance(first, dict):
+                if first.get("b64_json"):
+                    return f"data:image/png;base64,{first['b64_json']}"
+                if first.get("url"):
+                    return first["url"]
+        for key in ("url", "image_url", "image"):
+            val = parsed.get(key)
+            if val and isinstance(val, str):
+                return val
+        if parsed.get("b64_json"):
+            return f"data:image/png;base64,{parsed['b64_json']}"
+        return None
+
+
+class ZProEditProvider(BaseImageProvider):
+    """Provider for api.zpro.io.vn and standard OpenAI Image Edits API (/v1/images/edits)."""
+
+    IMAGE_ID = "input_file_0.png"
+
+    def get_endpoint(self) -> str:
+        return f"{self.base_url}/images/edits"
+
+    def prepare_prompt(self, prompt: str) -> str:
+        if "[ATTACHED_PHOTO]" in prompt:
+            return prompt.replace("[ATTACHED_PHOTO]", self.IMAGE_ID)
+        return prompt
+
+    def build_payload(self, prompt: str, reference_image: Optional[str] = None, image_detail: str = "high") -> Dict[str, Any]:
+        prepared_prompt = self.prepare_prompt(prompt)
+        payload = {
+            "model": self.model_name,
+            "prompt": prepared_prompt,
+            "n": 1,
+            "size": "auto",
+            "quality": "auto",
+            "background": "auto",
+            "image_detail": image_detail or "high",
+            "output_format": "png",
+            "response_format": "b64_json",
+            "stream": True,
+            "images": [],
+        }
+        if reference_image and str(reference_image).strip():
+            payload["images"].append({
+                "id": self.IMAGE_ID,
+                "image_url": str(reference_image).strip()
+            })
+        return payload
+
+
+class NineRouterGenerationsProvider(BaseImageProvider):
+    """Provider for 9router.phuonganh.io.vn (/v1/images/generations with flat image field)."""
+
+    def get_endpoint(self) -> str:
+        return f"{self.base_url}/images/generations"
+
+    def prepare_prompt(self, prompt: str) -> str:
+        if "[ATTACHED_PHOTO]" in prompt:
+            return prompt.replace("[ATTACHED_PHOTO]", "the attached reference image")
+        return prompt
+
+    def build_payload(self, prompt: str, reference_image: Optional[str] = None, image_detail: str = "high") -> Dict[str, Any]:
+        prepared_prompt = self.prepare_prompt(prompt)
+        payload = {
+            "model": self.model_name,
+            "prompt": prepared_prompt,
+            "n": 1,
+            "size": "auto",
+            "quality": "auto",
+            "background": "auto",
+            "image_detail": image_detail or "high",
+            "output_format": "png",
+            "response_format": "b64_json",
+            "stream": True,
+        }
+        if reference_image and str(reference_image).strip():
+            payload["image"] = str(reference_image).strip()
+        return payload
+
+
+class OmniRouteResponseProvider(BaseImageProvider):
+    """Provider for omniroute.phuonganh.io.vn (/v1/responses)."""
+
+    def get_endpoint(self) -> str:
+        return f"{self.base_url}/responses"
+
+    def prepare_prompt(self, prompt: str) -> str:
+        if "[ATTACHED_PHOTO]" in prompt:
+            return prompt.replace("[ATTACHED_PHOTO]", "the input image")
+        return prompt
+
+    def build_payload(self, prompt: str, reference_image: Optional[str] = None, image_detail: str = "high") -> Dict[str, Any]:
+        prepared_prompt = self.prepare_prompt(prompt)
+        content_list = []
+        if reference_image and str(reference_image).strip():
+            content_list.append({
+                "type": "input_image",
+                "image_url": str(reference_image).strip(),
+                "detail": image_detail or "high"
+            })
+        content_list.append({
+            "type": "input_text",
+            "text": prepared_prompt
+        })
+        return {
+            "model": self.model_name,
+            "input": [
+                {
+                    "role": "user",
+                    "content": content_list
+                }
+            ],
+            "tools": [
+                {
+                    "type": "image_generation",
+                    "model": self.model_name,
+                    "action": "edit" if reference_image else "generate",
+                    "quality": "auto",
+                    "size": "auto",
+                    "output_format": "png"
+                }
+            ],
+            "tool_choice": {
+                "type": "image_generation"
+            }
+        }
+
+
+def get_image_provider(
+    base_url: str,
+    api_key: str,
+    model_name: str,
+    image_type: Optional[str] = None,
+    timeout: int = 300,
+) -> BaseImageProvider:
+    """Factory to return provider adapter. Default is ZProEditProvider (OpenAI Image Edits spec)."""
+    t = (image_type or "").strip().lower()
+    if not t:
+        if "9router" in (base_url or "").lower():
+            t = "9router"
+        elif "omniroute" in (base_url or "").lower():
+            t = "response"
+        else:
+            t = "edit"
+
+    if t in ("9router", "generation", "generations"):
+        return NineRouterGenerationsProvider(base_url, api_key, model_name, timeout)
+    elif t in ("response", "responses", "omni", "omniroute"):
+        return OmniRouteResponseProvider(base_url, api_key, model_name, timeout)
+    else:
+        return ZProEditProvider(base_url, api_key, model_name, timeout)
+
+
 def call_openai_images_generations(
     base_url: str, api_key: str, model_name: str, prompt: str, timeout: int,
     reference_image: Optional[str] = None, image_detail: str = "high",
+    image_type: Optional[str] = None,
 ) -> Optional[str]:
-    """Call the tested router contract and parse JSON or SSE output."""
-    endpoint = f"{base_url.rstrip('/')}/images/generations"
-    headers = {
-        "Content-Type": "application/json",
-        "Authorization": f"Bearer {api_key}",
-        "Accept": "text/event-stream",
-    }
-    payload = {
-        "model": model_name, "prompt": prompt, "n": 1,
-        "size": "auto", "quality": "auto", "background": "auto",
-        "image_detail": image_detail or "high", "output_format": "png",
-        "response_format": "b64_json",
-        "stream": True,
-    }
-    if reference_image:
-        payload["image"] = reference_image
+    """Call image provider contract and parse JSON or SSE output."""
+    provider = get_image_provider(base_url, api_key, model_name, image_type, timeout)
+    endpoint = provider.get_endpoint()
+    headers = provider.get_headers()
+    payload = provider.build_payload(prompt, reference_image, image_detail)
+
     ctx = ssl.create_default_context()
     ctx.check_hostname = False
     ctx.verify_mode = ssl.CERT_NONE
@@ -197,6 +372,7 @@ def call_openai_images_generations(
         req = urllib.request.Request(endpoint, data=req_data, headers=headers)
         with urllib.request.urlopen(req, timeout=timeout, context=ctx) as resp:
             body = resp.read().decode("utf-8", errors="ignore")
+
         candidates = [body] + [
             line[5:].strip() for line in body.splitlines()
             if line.startswith("data:") and line[5:].strip() not in ("", "[DONE]")
@@ -208,12 +384,11 @@ def call_openai_images_generations(
                 if extracted:
                     return extracted[0]
                 continue
-            if isinstance(data, dict) and data.get("data"):
-                first = data["data"][0]
-                if first.get("url"):
-                    return first["url"]
-                if first.get("b64_json"):
-                    return f"data:image/png;base64,{first['b64_json']}"
+
+            img = provider.extract_image_from_parsed(data)
+            if img:
+                return img
+
             extracted = extract_image_from_text(json.dumps(data, ensure_ascii=False))
             if extracted:
                 return extracted[0]
@@ -221,27 +396,16 @@ def call_openai_images_generations(
         return None
     return None
 
-
 def stream_openai_images_generations(
     base_url: str, api_key: str, model_name: str, prompt: str, timeout: int,
     reference_image: Optional[str] = None, image_detail: str = "high",
+    image_type: Optional[str] = None,
 ):
     """Gọi endpoint upstream qua SSE và yield trạng thái theo thời gian thực."""
-    endpoint = f"{base_url.rstrip('/')}/images/generations"
-    headers = {
-        "Content-Type": "application/json",
-        "Authorization": f"Bearer {api_key}",
-        "Accept": "text/event-stream",
-    }
-    payload = {
-        "model": model_name, "prompt": prompt, "n": 1,
-        "size": "auto", "quality": "auto", "background": "auto",
-        "image_detail": image_detail or "high", "output_format": "png",
-        "response_format": "b64_json",
-        "stream": True,
-    }
-    if reference_image:
-        payload["image"] = reference_image
+    provider = get_image_provider(base_url, api_key, model_name, image_type, timeout)
+    endpoint = provider.get_endpoint()
+    headers = provider.get_headers()
+    payload = provider.build_payload(prompt, reference_image, image_detail)
 
     ctx = ssl.create_default_context()
     ctx.check_hostname = False
@@ -278,24 +442,7 @@ def stream_openai_images_generations(
                         yield {"type": "error", "message": f"Lỗi upstream: {err_msg}"}
                         return
 
-                    img_candidate = None
-                    if "data" in parsed and isinstance(parsed["data"], list) and len(parsed["data"]) > 0:
-                        first = parsed["data"][0]
-                        if isinstance(first, dict):
-                            if first.get("b64_json"):
-                                img_candidate = f"data:image/png;base64,{first['b64_json']}"
-                            elif first.get("url"):
-                                img_candidate = first["url"]
-
-                    if not img_candidate:
-                        if parsed.get("url"):
-                            img_candidate = parsed["url"]
-                        elif parsed.get("image_url"):
-                            img_candidate = parsed["image_url"]
-                        elif parsed.get("image") and isinstance(parsed["image"], str):
-                            img_candidate = parsed["image"]
-                        elif parsed.get("b64_json"):
-                            img_candidate = f"data:image/png;base64,{parsed['b64_json']}"
+                    img_candidate = provider.extract_image_from_parsed(parsed)
 
                     if img_candidate:
                         has_image = True
@@ -454,6 +601,7 @@ def call_ai_generate_image(
     image_source = call_openai_images_generations(
         base_url, api_key, model_name, full_prompt, timeout,
         reference_image=reference_image, image_detail=image_detail,
+        image_type=config.get("image_type"),
     )
     if not image_source:
         return False, None, None, "API tạo ảnh không trả về ảnh hợp lệ"
