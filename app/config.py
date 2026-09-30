@@ -206,6 +206,16 @@ def is_setup_done() -> bool:
     return bool(cfg.get("setup_done") or cfg.get("api_key"))
 
 
+def get_video_models() -> list:
+    cfg = get_ai_config()
+    return cfg.get("video_models", ["zpro-payg/grok-imagine-video", "grok-imagine-video"])
+
+
+def get_image_models() -> list:
+    cfg = get_ai_config()
+    return cfg.get("image_models", ["cx/gpt-5.6-sol-image"])
+
+
 # Ensure required directories exist
 IMAGES_DIR.mkdir(parents=True, exist_ok=True)
 STATIC_DIR.mkdir(parents=True, exist_ok=True)

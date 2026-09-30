@@ -247,17 +247,21 @@ def stream_openai_images_generations(
     ctx.check_hostname = False
     ctx.verify_mode = ssl.CERT_NONE
 
-    yield {"type": "status", "message": f"Đang gửi yêu cầu tới mô hình {model_name}..."}
+    yield {"type": "status", "message": f"Đang kết nối SSE tới {endpoint} (model: {model_name})..."}
 
     try:
         req_data = json.dumps(payload, ensure_ascii=False).encode("utf-8")
         req = urllib.request.Request(endpoint, data=req_data, headers=headers)
         with urllib.request.urlopen(req, timeout=timeout, context=ctx) as resp:
-            yield {"type": "status", "message": f"Mô hình {model_name} đã nhận yêu cầu, đang xử lý..."}
+            yield {"type": "status", "message": f"Đã kết nối stream thành công. Đang nhận phản hồi thời gian thực từ {model_name}..."}
             has_image = False
             for raw_line in resp:
                 line = raw_line.decode("utf-8", errors="ignore").strip()
                 if not line:
+                    continue
+
+                # Bỏ qua các dòng điều khiển SSE như event:, id:, comment
+                if line.startswith("event:") or line.startswith(":") or line.startswith("id:"):
                     continue
 
                 data_str = line[5:].strip() if line.startswith("data:") else line
@@ -296,7 +300,7 @@ def stream_openai_images_generations(
                     if img_candidate:
                         has_image = True
                         if img_candidate.startswith("http://") or img_candidate.startswith("https://"):
-                            yield {"type": "status", "message": "Đang chuyển ảnh kết quả sang định dạng Base64..."}
+                            yield {"type": "status", "message": "Đã nhận URL ảnh từ 9router, đang chuyển đổi sang Base64..."}
                             b64 = fetch_url_to_base64(img_candidate)
                             if b64:
                                 img_candidate = b64
@@ -310,12 +314,22 @@ def stream_openai_images_generations(
                         }
                         return
 
-                    # Trạng thái tiến trình từ upstream
-                    status_text = parsed.get("status") or parsed.get("message") or parsed.get("progress")
-                    if status_text:
-                        yield {"type": "status", "message": f"Tiến trình: {status_text}"}
-                    elif "step" in parsed:
-                        yield {"type": "status", "message": f"Bước: {parsed.get('step')}"}
+                    # Đọc content delta nếu model trả về dạng choices
+                    if "choices" in parsed and isinstance(parsed["choices"], list):
+                        for choice in parsed["choices"]:
+                            if isinstance(choice, dict):
+                                delta = choice.get("delta") or {}
+                                content = delta.get("content") or delta.get("reasoning_content") or choice.get("text")
+                                if content:
+                                    yield {"type": "chunk", "text": content}
+                        continue
+
+                    # Các trường JSON trạng thái tiến trình (progress, stage, bytesReceived...)
+                    filtered = {k: v for k, v in parsed.items() if k not in ("id", "object", "created", "model")}
+                    if filtered:
+                        yield {"type": "progress", "data": filtered}
+                    else:
+                        yield {"type": "progress", "data": parsed}
                 else:
                     # Trích xuất ảnh nếu là text dạng SVG hoặc URL
                     extracted = extract_image_from_text(data_str)
@@ -335,9 +349,11 @@ def stream_openai_images_generations(
                             "message": f"Sinh ảnh thành công bằng {model_name}"
                         }
                         return
+                    else:
+                        yield {"type": "status", "message": data_str}
 
             if not has_image:
-                yield {"type": "error", "message": "API không trả về ảnh hợp lệ"}
+                yield {"type": "error", "message": "Mô hình AI đã hoàn tất stream nhưng không có dữ liệu ảnh trả về"}
 
     except urllib.error.HTTPError as e:
         err_body = e.read().decode("utf-8", errors="ignore")

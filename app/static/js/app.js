@@ -5311,7 +5311,51 @@ async function submitGenerateImage() {
         }
     }
 
-    // 2. AI Image Generation
+function formatProgressDataToHtml(data) {
+    if (!data) return '';
+    let obj = data;
+    if (typeof data === 'string') {
+        const trimmed = data.trim();
+        if (trimmed.startsWith('{') && trimmed.endsWith('}')) {
+            try { obj = JSON.parse(trimmed); } catch (_) { return escapeHtml(data); }
+        } else {
+            return escapeHtml(data);
+        }
+    }
+    if (typeof obj !== 'object' || obj === null) {
+        return escapeHtml(String(obj));
+    }
+
+    const items = [];
+    for (const [k, v] of Object.entries(obj)) {
+        if (k === 'id' || k === 'object' || k === 'created' || k === 'model') continue;
+        const valStr = (typeof v === 'object' && v !== null) ? JSON.stringify(v) : String(v);
+
+        let badgeClass = 'bg-purple-950/80 text-purple-300 border-purple-500/40';
+        let textClass = 'text-slate-200 font-medium';
+
+        const kLower = k.toLowerCase();
+        if (kLower === 'stage' || kLower === 'status' || kLower === 'phase') {
+            badgeClass = 'bg-indigo-950/80 text-indigo-300 border-indigo-500/40';
+            textClass = 'text-indigo-200 font-semibold';
+        } else if (kLower.includes('byte') || kLower.includes('size') || kLower === 'progress' || kLower === 'step') {
+            badgeClass = 'bg-cyan-950/80 text-cyan-300 border-cyan-500/40';
+            textClass = 'text-emerald-400 font-semibold';
+        } else if (kLower === 'error') {
+            badgeClass = 'bg-red-950/80 text-red-300 border-red-500/40';
+            textClass = 'text-red-300 font-semibold';
+        }
+
+        const tag = `<span class="inline-flex items-center gap-1.5 bg-dark-900/90 px-2 py-0.5 rounded-lg border border-dark-700/80 shadow-xs mr-2 mb-1">`
+                  + `<span class="px-1.5 py-0.2 rounded text-[10px] font-mono font-bold uppercase tracking-wider border ${badgeClass}">${escapeHtml(k)}</span>`
+                  + `<span class="font-mono text-xs ${textClass}">${escapeHtml(valStr)}</span>`
+                  + `</span>`;
+        items.push(tag);
+    }
+    return items.length > 0 ? items.join('') : escapeHtml(JSON.stringify(obj));
+}
+
+// 2. AI Image Generation
     document.getElementById('genLoadingState').classList.remove('hidden');
     if (btnText) btnText.innerText = 'Đang tạo ảnh AI...';
 
@@ -5320,6 +5364,15 @@ async function submitGenerateImage() {
     // Timer counter
     genTimerSeconds = 0;
     const timerEl = document.getElementById('genLoadingTimer');
+    const streamLogEl = document.getElementById('genStreamLog');
+    const streamBadgeEl = document.getElementById('genStreamStatusBadge');
+    if (streamLogEl) {
+        streamLogEl.innerHTML = '<div class="text-slate-400 font-mono">Đang khởi tạo kết nối SSE tới 9router...</div>';
+    }
+    if (streamBadgeEl) {
+        streamBadgeEl.innerText = 'CONNECTING';
+        streamBadgeEl.className = 'text-[10px] px-1.5 py-0.5 rounded bg-purple-500/20 text-purple-300';
+    }
     const modelDisplayName = selectedModel || 'Custom OpenAI Router';
     if (timerEl) timerEl.innerText = `Đang kết nối tới ${modelDisplayName} (0s)...`;
     if (genTimerInterval) clearInterval(genTimerInterval);
@@ -5353,6 +5406,11 @@ async function submitGenerateImage() {
             throw new Error(errData?.detail || errData?.message || ('Lỗi server HTTP ' + response.status));
         }
 
+        if (streamBadgeEl) {
+            streamBadgeEl.innerText = 'STREAMING';
+            streamBadgeEl.className = 'text-[10px] px-1.5 py-0.5 rounded bg-emerald-500/20 text-emerald-300 animate-pulse';
+        }
+
         // Đọc SSE stream realtime
         const reader = response.body.getReader();
         const decoder = new TextDecoder('utf-8');
@@ -5380,13 +5438,83 @@ async function submitGenerateImage() {
                     continue;
                 }
 
-                if (evt.type === 'status') {
+                if (evt.type === 'progress' || (evt.type === 'status' && evt.data)) {
+                    const progData = evt.data || evt;
                     if (timerEl) {
-                        timerEl.innerText = `${evt.message} (${genTimerSeconds}s)...`;
+                        const brief = progData.stage || progData.status || progData.message || (progData.bytesReceived ? `Nhận ${progData.bytesReceived} bytes` : 'Đang xử lý...');
+                        timerEl.innerText = `${brief} (${genTimerSeconds}s)...`;
+                    }
+                    if (streamLogEl) {
+                        const timeStr = new Date().toLocaleTimeString('vi-VN');
+                        const div = document.createElement('div');
+                        div.className = 'flex flex-wrap items-center gap-1 py-1 border-b border-dark-800/40';
+                        div.innerHTML = `<span class="text-purple-400 font-bold font-mono text-[10px] shrink-0 mr-1">[${timeStr}]</span> ${formatProgressDataToHtml(progData)}`;
+                        streamLogEl.appendChild(div);
+                        streamLogEl.scrollTop = streamLogEl.scrollHeight;
+                    }
+                } else if (evt.type === 'status') {
+                    // Kiểm tra xem message có phải là JSON object string không
+                    let isJson = false;
+                    let parsedObj = null;
+                    if (typeof evt.message === 'string' && evt.message.trim().startsWith('{') && evt.message.trim().endsWith('}')) {
+                        try {
+                            parsedObj = JSON.parse(evt.message.trim());
+                            isJson = true;
+                        } catch (_) {}
+                    }
+
+                    if (isJson && parsedObj) {
+                        if (timerEl) {
+                            const brief = parsedObj.stage || parsedObj.status || parsedObj.message || (parsedObj.bytesReceived ? `Nhận ${parsedObj.bytesReceived} bytes` : 'Đang xử lý...');
+                            timerEl.innerText = `${brief} (${genTimerSeconds}s)...`;
+                        }
+                        if (streamLogEl) {
+                            const timeStr = new Date().toLocaleTimeString('vi-VN');
+                            const div = document.createElement('div');
+                            div.className = 'flex flex-wrap items-center gap-1 py-1 border-b border-dark-800/40';
+                            div.innerHTML = `<span class="text-purple-400 font-bold font-mono text-[10px] shrink-0 mr-1">[${timeStr}]</span> ${formatProgressDataToHtml(parsedObj)}`;
+                            streamLogEl.appendChild(div);
+                            streamLogEl.scrollTop = streamLogEl.scrollHeight;
+                        }
+                    } else {
+                        if (timerEl) {
+                            timerEl.innerText = `${evt.message} (${genTimerSeconds}s)...`;
+                        }
+                        if (streamLogEl) {
+                            const timeStr = new Date().toLocaleTimeString('vi-VN');
+                            const div = document.createElement('div');
+                            div.className = 'text-slate-300 flex items-start gap-1.5 py-0.5 border-b border-dark-800/40 font-mono text-[11px]';
+                            div.innerHTML = `<span class="text-purple-400 font-bold shrink-0">[${timeStr}]</span> <span>${escapeHtml(evt.message)}</span>`;
+                            streamLogEl.appendChild(div);
+                            streamLogEl.scrollTop = streamLogEl.scrollHeight;
+                        }
+                    }
+                } else if (evt.type === 'chunk' && evt.text) {
+                    if (streamLogEl) {
+                        let last = streamLogEl.lastElementChild;
+                        if (!last || !last.classList.contains('stream-chunk-box')) {
+                            last = document.createElement('div');
+                            last.className = 'stream-chunk-box text-pink-300 bg-dark-900/60 p-2 rounded border border-purple-500/20 whitespace-pre-wrap font-sans text-xs my-1';
+                            streamLogEl.appendChild(last);
+                        }
+                        last.textContent += evt.text;
+                        streamLogEl.scrollTop = streamLogEl.scrollHeight;
                     }
                 } else if (evt.type === 'complete' && evt.image_url) {
                     receivedImage = true;
                     currentGeneratedImageData = evt.image_url;
+
+                    if (streamBadgeEl) {
+                        streamBadgeEl.innerText = 'COMPLETED';
+                        streamBadgeEl.className = 'text-[10px] px-1.5 py-0.5 rounded bg-emerald-500/20 text-emerald-400';
+                    }
+                    if (streamLogEl) {
+                        const div = document.createElement('div');
+                        div.className = 'text-emerald-400 font-bold flex items-center gap-1.5 mt-1.5 pt-1 border-t border-emerald-500/30';
+                        div.innerHTML = `<i class="fa-solid fa-check"></i> <span>${escapeHtml(evt.message || 'Sinh ảnh thành công')}</span>`;
+                        streamLogEl.appendChild(div);
+                        streamLogEl.scrollTop = streamLogEl.scrollHeight;
+                    }
 
                     const resultImg = document.getElementById('genResultImg');
                     if (resultImg) resultImg.src = evt.image_url;
@@ -5401,6 +5529,17 @@ async function submitGenerateImage() {
                         noteEl.innerText = evt.message || 'Tạo ảnh thành công từ AI';
                     }
                 } else if (evt.type === 'error') {
+                    if (streamBadgeEl) {
+                        streamBadgeEl.innerText = 'ERROR';
+                        streamBadgeEl.className = 'text-[10px] px-1.5 py-0.5 rounded bg-red-500/20 text-red-400';
+                    }
+                    if (streamLogEl) {
+                        const div = document.createElement('div');
+                        div.className = 'text-red-400 font-semibold flex items-center gap-1.5 mt-1.5 pt-1 border-t border-red-500/30';
+                        div.innerHTML = `<i class="fa-solid fa-triangle-exclamation"></i> <span>${escapeHtml(evt.message)}</span>`;
+                        streamLogEl.appendChild(div);
+                        streamLogEl.scrollTop = streamLogEl.scrollHeight;
+                    }
                     throw new Error(evt.message || 'Lỗi từ mô hình AI');
                 }
             }

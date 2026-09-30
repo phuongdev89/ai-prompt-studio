@@ -1418,6 +1418,20 @@
                     <div class="w-48 h-1.5 bg-dark-800 rounded-full mx-auto overflow-hidden">
                         <div class="h-full bg-gradient-to-r from-purple-500 to-pink-500 rounded-full animate-pulse w-full"></div>
                     </div>
+
+                    <!-- Real-time SSE Stream Console -->
+                    <div id="genStreamConsole" class="mt-4 p-3.5 rounded-xl bg-dark-950/95 border border-purple-500/20 text-left font-mono text-xs shadow-inner">
+                        <div class="text-[11px] font-semibold text-purple-300 mb-2 flex items-center justify-between border-b border-dark-800 pb-1.5">
+                            <span class="flex items-center gap-1.5">
+                                <span class="w-2 h-2 rounded-full bg-emerald-400 animate-ping"></span>
+                                <span>Tiến trình luồng SSE (9router):</span>
+                            </span>
+                            <span id="genStreamStatusBadge" class="text-[10px] px-1.5 py-0.5 rounded bg-purple-500/20 text-purple-300">STREAMING</span>
+                        </div>
+                        <div id="genStreamLog" class="max-h-48 overflow-y-auto space-y-1 text-slate-300 text-[11px] leading-relaxed scrollbar-thin select-text">
+                            <div class="text-slate-500 italic">Đang chờ sự kiện đầu tiên từ máy chủ...</div>
+                        </div>
+                    </div>
                 </div>
 
                 <!-- Generated Result Section (Hidden initially) -->

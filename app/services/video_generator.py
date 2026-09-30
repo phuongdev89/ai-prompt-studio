@@ -8,7 +8,7 @@ import urllib.request
 import urllib.error
 from pathlib import Path
 from typing import Dict, Any, Tuple, Optional
-from app.config import get_ai_config, get_video_models, IMAGES_DIR
+from app.config import get_ai_config, IMAGES_DIR
 from app.db.repository import PromptRepository
 
 AVAILABLE_VIDEO_MODELS = [
