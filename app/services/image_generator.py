@@ -4,6 +4,7 @@ import ssl
 import time
 import json
 import base64
+import hashlib
 import urllib.request
 import urllib.error
 import urllib.parse
@@ -11,6 +12,7 @@ from pathlib import Path
 from typing import Dict, Any, Tuple, Optional
 from app.config import get_ai_config, IMAGES_DIR
 from app.db.repository import PromptRepository
+from app.services.s3_storage import is_configured, upload_content_to_s3, compute_md5
 
 GENERATE_IMAGE_SYSTEM_PROMPT = """You are an expert AI Image Generation & Creative Visual Artist.
 The user will provide a prompt and optional reference image or extra specifications.
@@ -613,12 +615,55 @@ def call_ai_generate_image(
     return True, image_source, fmt, f"Sinh ảnh thành công bằng {model_name}"
 
 
+def resize_image_to_max_dimension(img_bytes: bytes, max_dim: int = 480, default_ext: str = "png") -> Tuple[bytes, str, str]:
+    """Resize image so that max(width, height) <= max_dim (preserving aspect ratio).
+    Returns (resized_bytes, extension, mime_type).
+    """
+    try:
+        from PIL import Image
+        import io
+        img = Image.open(io.BytesIO(img_bytes))
+        orig_w, orig_h = img.size
+        img_format = (img.format or "").upper()
+
+        if max(orig_w, orig_h) > max_dim:
+            scale = max_dim / max(orig_w, orig_h)
+            new_w = max(1, int(round(orig_w * scale)))
+            new_h = max(1, int(round(orig_h * scale)))
+            resample_filter = getattr(getattr(Image, "Resampling", Image), "LANCZOS", Image.LANCZOS)
+            img = img.resize((new_w, new_h), resample=resample_filter)
+
+        out_buf = io.BytesIO()
+        if img_format in ("JPEG", "JPG"):
+            ext = "jpg"
+            mime = "image/jpeg"
+            if img.mode in ("RGBA", "LA", "P"):
+                rgb_img = Image.new("RGB", img.size, (255, 255, 255))
+                if img.mode == "P":
+                    img = img.convert("RGBA")
+                rgb_img.paste(img, mask=img.split()[3] if img.mode == "RGBA" else None)
+                img = rgb_img
+            img.save(out_buf, format="JPEG", quality=85, optimize=True)
+        elif img_format == "WEBP":
+            ext = "webp"
+            mime = "image/webp"
+            img.save(out_buf, format="WEBP", quality=85)
+        else:
+            ext = "png"
+            mime = "image/png"
+            img.save(out_buf, format="PNG", optimize=True)
+
+        return out_buf.getvalue(), ext, mime
+    except Exception as e:
+        mime = f"image/{default_ext}"
+        return img_bytes, default_ext, mime
+
+
 def save_generated_image_to_prompt(prompt_id: str, image_data_or_url: str) -> Tuple[bool, Optional[str], str]:
+    """Save newly generated AI image to a prompt record.
+    Resizes image to max 480px, saves locally and uploads the 480px version to S3 (no original file saved).
     """
-    Saves the generated image to local disk (data/images/) and adds it to the prompt's database record.
-    Returns: (success, filename, message)
-    """
-    if not prompt_id or not image_data_or_url:
+    if not image_data_or_url or not str(image_data_or_url).strip():
         return False, None, "Dữ liệu không hợp lệ"
 
     # Check prompt exists
@@ -626,8 +671,8 @@ def save_generated_image_to_prompt(prompt_id: str, image_data_or_url: str) -> Tu
     if not prompt:
         return False, None, f"Không tìm thấy bản ghi {prompt_id}"
 
-    timestamp = int(time.time())
     IMAGES_DIR.mkdir(parents=True, exist_ok=True)
+    cfg = get_ai_config()
 
     try:
         # 1. Base64 data URI
@@ -641,41 +686,78 @@ def save_generated_image_to_prompt(prompt_id: str, image_data_or_url: str) -> Tu
             elif "svg" in header:
                 ext = "svg"
 
-            filename = f"{prompt_id}_gen_{timestamp}.{ext}"
-            file_path = IMAGES_DIR / filename
             img_bytes = base64.b64decode(b64_str)
+
+            # Resize to max 480px before saving or uploading to S3
+            if ext != "svg":
+                img_bytes, ext, mime_type = resize_image_to_max_dimension(img_bytes, max_dim=480, default_ext=ext)
+            else:
+                mime_type = "image/svg+xml"
+
+            md5_hex = hashlib.md5(img_bytes).hexdigest()
+            filename = f"{md5_hex}.{ext}"
+            file_path = IMAGES_DIR / filename
             with open(file_path, "wb") as f:
                 f.write(img_bytes)
 
             file_size = len(img_bytes)
             local_path = f"images/{filename}"
 
+            target_url = local_path
+            if is_configured(cfg):
+                try:
+                    s3_res = upload_content_to_s3(
+                        content=img_bytes,
+                        filename=filename,
+                        mime=mime_type,
+                        prefix=cfg.get("s3_key_prefix", "ai_prompts_database"),
+                        cfg=cfg
+                    )
+                    target_url = s3_res.get("url") or local_path
+                except Exception as s3_err:
+                    print(f"[!] Warning S3 upload failed on save generated image: {s3_err}")
+
             PromptRepository.add_image_to_prompt(
                 prompt_id=prompt_id,
                 filename=filename,
                 local_path=local_path,
-                url=local_path,
+                url=target_url,
                 file_size=file_size,
                 status="downloaded"
             )
-            return True, filename, "Lưu ảnh thành công vào bản ghi"
+            return True, filename, "Lưu ảnh (480px) thành công vào bản ghi"
 
         # 2. SVG string
         elif image_data_or_url.strip().startswith("<svg"):
-            filename = f"{prompt_id}_gen_{timestamp}.svg"
-            file_path = IMAGES_DIR / filename
             svg_bytes = image_data_or_url.encode("utf-8")
+            md5_hex = hashlib.md5(svg_bytes).hexdigest()
+            filename = f"{md5_hex}.svg"
+            file_path = IMAGES_DIR / filename
             with open(file_path, "wb") as f:
                 f.write(svg_bytes)
 
             file_size = len(svg_bytes)
             local_path = f"images/{filename}"
 
+            target_url = local_path
+            if is_configured(cfg):
+                try:
+                    s3_res = upload_content_to_s3(
+                        content=svg_bytes,
+                        filename=filename,
+                        mime="image/svg+xml",
+                        prefix=cfg.get("s3_key_prefix", "ai_prompts_database"),
+                        cfg=cfg
+                    )
+                    target_url = s3_res.get("url") or local_path
+                except Exception as s3_err:
+                    print(f"[!] Warning S3 upload failed on save generated svg: {s3_err}")
+
             PromptRepository.add_image_to_prompt(
                 prompt_id=prompt_id,
                 filename=filename,
                 local_path=local_path,
-                url=local_path,
+                url=target_url,
                 file_size=file_size,
                 status="downloaded"
             )
@@ -683,9 +765,6 @@ def save_generated_image_to_prompt(prompt_id: str, image_data_or_url: str) -> Tu
 
         # 3. HTTP / HTTPS URL
         elif image_data_or_url.startswith("http://") or image_data_or_url.startswith("https://"):
-            filename = f"{prompt_id}_gen_{timestamp}.jpg"
-            file_path = IMAGES_DIR / filename
-
             ctx = ssl.create_default_context()
             ctx.check_hostname = False
             ctx.verify_mode = ssl.CERT_NONE
@@ -695,31 +774,50 @@ def save_generated_image_to_prompt(prompt_id: str, image_data_or_url: str) -> Tu
                 headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
             )
             with urllib.request.urlopen(req, timeout=30, context=ctx) as resp:
-                content = resp.read()
-                # Detect actual content type
+                raw_content = resp.read()
                 ct = resp.headers.get("Content-Type", "")
+                ext = "jpg"
                 if "png" in ct:
-                    filename = f"{prompt_id}_gen_{timestamp}.png"
-                    file_path = IMAGES_DIR / filename
+                    ext = "png"
                 elif "webp" in ct:
-                    filename = f"{prompt_id}_gen_{timestamp}.webp"
-                    file_path = IMAGES_DIR / filename
+                    ext = "webp"
 
-                with open(file_path, "wb") as f:
-                    f.write(content)
+            # Resize to max 480px before saving or uploading to S3
+            content, ext, mime_type = resize_image_to_max_dimension(raw_content, max_dim=480, default_ext=ext)
+
+            md5_hex = hashlib.md5(content).hexdigest()
+            filename = f"{md5_hex}.{ext}"
+            file_path = IMAGES_DIR / filename
+
+            with open(file_path, "wb") as f:
+                f.write(content)
 
             file_size = len(content)
             local_path = f"images/{filename}"
+
+            target_url = local_path
+            if is_configured(cfg):
+                try:
+                    s3_res = upload_content_to_s3(
+                        content=content,
+                        filename=filename,
+                        mime=mime_type,
+                        prefix=cfg.get("s3_key_prefix", "ai_prompts_database"),
+                        cfg=cfg
+                    )
+                    target_url = s3_res.get("url") or local_path
+                except Exception as s3_err:
+                    print(f"[!] Warning S3 upload failed on save generated url: {s3_err}")
 
             PromptRepository.add_image_to_prompt(
                 prompt_id=prompt_id,
                 filename=filename,
                 local_path=local_path,
-                url=image_data_or_url,
+                url=target_url,
                 file_size=file_size,
                 status="downloaded"
             )
-            return True, filename, "Lưu ảnh thành công vào bản ghi"
+            return True, filename, "Lưu ảnh (480px) thành công vào bản ghi"
 
         else:
             return False, None, "Định dạng dữ liệu ảnh không hỗ trợ"

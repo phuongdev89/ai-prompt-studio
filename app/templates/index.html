@@ -1424,7 +1424,7 @@
                         <div class="text-[11px] font-semibold text-purple-300 mb-2 flex items-center justify-between border-b border-dark-800 pb-1.5">
                             <span class="flex items-center gap-1.5">
                                 <span class="w-2 h-2 rounded-full bg-emerald-400 animate-ping"></span>
-                                <span>Tiến trình luồng SSE (9router):</span>
+                                <span>Tiến trình luồng SSE:</span>
                             </span>
                             <span id="genStreamStatusBadge" class="text-[10px] px-1.5 py-0.5 rounded bg-purple-500/20 text-purple-300">STREAMING</span>
                         </div>
@@ -1459,17 +1459,22 @@
                     <!-- AI Note / Message -->
                     <div id="genResultNote" class="text-xs text-slate-400 bg-dark-900 p-2.5 rounded-lg border border-dark-700/80"></div>
 
-                    <!-- Result Action Buttons: Tải về máy & Lưu vào bản ghi -->
-                    <div class="flex items-center gap-3 pt-2 flex-wrap">
+                    <!-- Result Action Buttons: Lưu về máy, Lưu vào KOC gallery, Lưu vào bản ghi này -->
+                    <div class="flex items-center gap-2.5 pt-2 flex-wrap sm:flex-nowrap">
                         <button type="button" onclick="downloadCurrentGeneratedImage()" id="btnDownloadGenImg"
-                                class="flex-1 px-4 py-2.5 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white text-xs font-bold shadow-lg shadow-emerald-600/25 flex items-center justify-center gap-2 transition active:scale-95">
+                                class="flex-1 px-3 py-2.5 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white text-xs font-bold shadow-lg shadow-emerald-600/25 flex items-center justify-center gap-2 transition active:scale-95">
                             <i class="fa-solid fa-download text-sm"></i>
-                            <span>Tải ảnh về máy</span>
+                            <span>Lưu về máy</span>
+                        </button>
+                        <button type="button" onclick="saveGeneratedImageToKocGallery()" id="btnSaveToKocGallery"
+                                class="flex-1 px-3 py-2.5 rounded-xl bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-500 hover:to-pink-500 text-white text-xs font-bold shadow-lg shadow-purple-600/25 flex items-center justify-center gap-2 transition active:scale-95">
+                            <i class="fa-solid fa-images text-sm"></i>
+                            <span id="btnSaveToKocGalleryText">Lưu vào KOC gallery</span>
                         </button>
                         <button type="button" onclick="saveGeneratedImageToRecord()" id="btnSaveToRecord"
-                                class="flex-1 px-4 py-2.5 rounded-xl bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-500 hover:to-purple-500 text-white text-xs font-bold shadow-lg shadow-indigo-600/25 flex items-center justify-center gap-2 transition active:scale-95">
+                                class="flex-1 px-3 py-2.5 rounded-xl bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-500 hover:to-purple-500 text-white text-xs font-bold shadow-lg shadow-indigo-600/25 flex items-center justify-center gap-2 transition active:scale-95">
                             <i class="fa-solid fa-floppy-disk text-sm"></i>
-                            <span>Lưu vào bản ghi này</span>
+                            <span id="btnSaveToRecordText">Lưu vào bản ghi này</span>
                         </button>
                     </div>
                 </div>

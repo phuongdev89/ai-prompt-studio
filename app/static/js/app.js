@@ -2349,12 +2349,33 @@ function processNewPromptFiles(files) {
 
         const reader = new FileReader();
         reader.onload = (e) => {
-            newPromptUploadedFiles.push({
+            const fileItem = {
                 name: file.name,
                 size: file.size,
-                dataUrl: e.target.result
-            });
+                dataUrl: e.target.result,
+                s3Url: null
+            };
+            newPromptUploadedFiles.push(fileItem);
             renderNewPromptFilesPreview();
+
+            // Upload immediately to S3
+            const formData = new FormData();
+            formData.append('file', file);
+            fetch('/api/s3/upload', {
+                method: 'POST',
+                body: formData
+            })
+            .then(res => res.json())
+            .then(data => {
+                if (data.url) {
+                    fileItem.s3Url = data.url;
+                    fileItem.dataUrl = data.url;
+                }
+                renderNewPromptFilesPreview();
+            })
+            .catch(err => {
+                console.warn('S3 upload warning:', err);
+            });
         };
         reader.readAsDataURL(file);
     });
@@ -2640,7 +2661,7 @@ function handleVideoFileSelect(event) {
     }
     const reader = new FileReader();
     reader.onload = (e) => {
-        newVideoUploadedFile = { name: file.name, size: file.size, dataUrl: e.target.result };
+        newVideoUploadedFile = { name: file.name, size: file.size, dataUrl: e.target.result, s3Url: null };
         const preview = document.getElementById('videoFilePreview');
         const dropzone = document.getElementById('videoDropzone');
         if (preview) {
@@ -2649,6 +2670,25 @@ function handleVideoFileSelect(event) {
             document.getElementById('videoFileSize').textContent = formatFileSize(file.size);
         }
         if (dropzone) dropzone.classList.add('hidden');
+
+        // Upload video immediately to S3
+        const formData = new FormData();
+        formData.append('file', file);
+        fetch('/api/s3/upload', {
+            method: 'POST',
+            body: formData
+        })
+        .then(res => res.json())
+        .then(data => {
+            if (data.url && newVideoUploadedFile) {
+                newVideoUploadedFile.s3Url = data.url;
+                newVideoUploadedFile.dataUrl = data.url;
+                showToast('Đã tải video lên S3 thành công');
+            }
+        })
+        .catch(err => {
+            console.warn('S3 upload video warning:', err);
+        });
     };
     reader.readAsDataURL(file);
 }
@@ -2702,7 +2742,7 @@ async function submitCreatePrompt(event) {
     submitBtn.innerHTML = '<i class="fa-solid fa-circle-notch fa-spin"></i> <span>Đang lưu...</span>';
 
     try {
-        const uploadedBase64List = newPromptUploadedFiles.map(f => f.dataUrl);
+        const uploadedBase64List = newPromptUploadedFiles.map(f => f.s3Url || f.dataUrl);
 
         const payload = {
             prompt: promptVal,
@@ -5047,22 +5087,34 @@ async function onKocSelectChange() {
 
         if (listEl) {
             listEl.innerHTML = images.map((img, idx) => {
-                const isSelected = selectedKocImagePath === img.path;
+                // Tối ưu tốc độ tải ảnh: Sử dụng link thumbnail (~30KB-80KB) thay vì ảnh gốc (2MB-5MB)
+                const thumbDisplayUrl = img.thumb || img.thumb_url || img.thumb_path || img.presigned_url || img.url || img.image || img.path;
+                const fullImageUrl = img.image || img.path || img.presigned_url || img.url || thumbDisplayUrl;
+                const isSelected = selectedKocImagePath === fullImageUrl || selectedKocImagePath === (img.presigned_url || img.path || img.url || img.image);
                 const encodedImg = encodeURIComponent(JSON.stringify(img));
                 return `
-                    <button type="button" onclick="selectKocImage('${encodedImg}')"
-                            id="kocCard_${idx}"
-                            class="koc-image-card relative group rounded-lg overflow-hidden border-2 transition aspect-square bg-dark-900 flex flex-col justify-end p-1 text-left ${isSelected ? 'border-purple-500 ring-2 ring-purple-500/50 bg-purple-500/10' : 'border-dark-700 hover:border-purple-400/80'}"
-                            title="${escapeHtml(img.name)}${img.caption ? ' - ' + escapeHtml(img.caption) : ''}">
-                        <img src="${img.url}" class="absolute inset-0 w-full h-full object-cover group-hover:scale-105 transition" loading="lazy" onerror="this.src='/static/favicon.png'">
-                        <div class="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition"></div>
+                    <div id="kocCard_${idx}"
+                         class="koc-image-card relative group rounded-lg overflow-hidden border-2 transition aspect-square bg-dark-900 flex flex-col justify-end p-1 text-left cursor-pointer ${isSelected ? 'border-purple-500 ring-2 ring-purple-500/50 bg-purple-500/10' : 'border-dark-700 hover:border-purple-400/80'}"
+                         onclick="selectKocImage('${encodedImg}')"
+                         title="${escapeHtml(img.name)}${img.caption ? ' - ' + escapeHtml(img.caption) : ''}">
+                        <img src="${thumbDisplayUrl}" class="absolute inset-0 w-full h-full object-cover group-hover:scale-105 transition" loading="lazy" onerror="this.src='/static/favicon.png'">
+                        <div class="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition pointer-events-none"></div>
+                        
+                        <!-- Nút phóng to xem ảnh gốc full-res qua Lightbox -->
+                        <button type="button"
+                                onclick="event.stopPropagation(); openLightbox('${fullImageUrl}')"
+                                class="absolute top-1 left-1 w-5 h-5 rounded-md bg-black/60 hover:bg-black/90 text-white flex items-center justify-center text-[10px] opacity-0 group-hover:opacity-100 transition shadow hover:scale-110 z-20"
+                                title="Xem ảnh gốc phóng to (High-res)">
+                            <i class="fa-solid fa-magnifying-glass-plus"></i>
+                        </button>
+
                         <span class="koc-selected-badge absolute top-1 right-1 w-4 h-4 rounded-full bg-purple-600 text-white flex items-center justify-center text-[9px] shadow ${isSelected ? '' : 'hidden'}">
                             <i class="fa-solid fa-check"></i>
                         </span>
-                        <span class="relative z-10 text-[9px] text-slate-200 truncate w-full px-1 py-0.5 rounded bg-black/70 backdrop-blur-xs font-mono">
+                        <span class="relative z-10 text-[9px] text-slate-200 truncate w-full px-1 py-0.5 rounded bg-black/70 backdrop-blur-xs font-mono pointer-events-none">
                             ${escapeHtml(img.name)}
                         </span>
-                    </button>
+                    </div>
                 `;
             }).join('');
         }
@@ -5079,10 +5131,19 @@ function selectKocImage(encodedImgJson) {
         const kocName = select ? select.value : 'KOC';
 
         currentRefSource = 'koc';
-        selectedKocImagePath = img.path;
+        // Ảnh gốc độ phân giải cao cho workflow AI / pipeline render
+        const fullImageUrl = img.image || img.path || img.presigned_url || img.url;
+        // Ảnh thumbnail siêu nhẹ cho hiển thị preview trên UI
+        const thumbDisplayUrl = img.thumb || img.thumb_url || img.thumb_path || fullImageUrl;
+
+        selectedKocImagePath = fullImageUrl;
         selectedKocImageObj = img;
         pendingUploadFileData = null;
-        currentRefImageData = null; // Sẽ upload lên S3 khi bấm "Tạo ảnh ngay"
+        if (selectedKocImagePath && (selectedKocImagePath.startsWith('http://') || selectedKocImagePath.startsWith('https://'))) {
+            currentRefImageData = selectedKocImagePath;
+        } else {
+            currentRefImageData = null;
+        }
 
         // Update card styles
         document.querySelectorAll('.koc-image-card').forEach(card => {
@@ -5109,7 +5170,11 @@ function selectKocImage(encodedImgJson) {
         const sourceBadge = document.getElementById('genRefSourceBadge');
         const captionBox = document.getElementById('genRefImageCaptionBox');
 
-        if (previewImg) previewImg.src = img.url;
+        // Hiển thị ảnh preview bằng thumbnail để tối ưu tốc độ render, click vào sẽ mở Lightbox xem ảnh gốc full-res
+        if (previewImg) {
+            previewImg.src = thumbDisplayUrl;
+            previewImg.onclick = () => openLightbox(fullImageUrl);
+        }
         if (sourceBadge) sourceBadge.innerText = `KOC: ${kocName}`;
         if (captionBox) {
             captionBox.innerHTML = `
@@ -5162,7 +5227,10 @@ function handleGenRefImageUpload(event) {
         const sourceBadge = document.getElementById('genRefSourceBadge');
         const captionBox = document.getElementById('genRefImageCaptionBox');
 
-        if (previewImg) previewImg.src = localData;
+        if (previewImg) {
+            previewImg.src = localData;
+            previewImg.onclick = () => openLightbox(localData);
+        }
         if (sourceBadge) sourceBadge.innerText = `Tệp tải lên: ${file.name}`;
         if (captionBox) {
             captionBox.innerHTML = `
@@ -5196,6 +5264,12 @@ function clearGenRefImage() {
     const previewBox = document.getElementById('genRefImagePreview');
     if (previewBox) previewBox.classList.add('hidden');
 
+    const previewImg = document.getElementById('genRefImagePreviewImg');
+    if (previewImg) {
+        previewImg.src = '';
+        previewImg.onclick = function() { openLightbox(this.src); };
+    }
+
     document.querySelectorAll('.koc-image-card').forEach(card => {
         card.classList.remove('border-purple-500', 'ring-2', 'ring-purple-500/50', 'bg-purple-500/10');
         card.classList.add('border-dark-700');
@@ -5217,7 +5291,10 @@ function selectExistingImageAsRef(src) {
     const sourceBadge = document.getElementById('genRefSourceBadge');
     const captionBox = document.getElementById('genRefImageCaptionBox');
 
-    if (previewImg) previewImg.src = src;
+    if (previewImg) {
+        previewImg.src = src;
+        previewImg.onclick = () => openLightbox(src);
+    }
     if (sourceBadge) sourceBadge.innerText = 'Ảnh mẫu từ bản ghi';
     if (captionBox) {
         captionBox.innerHTML = '<div class="text-[10px] text-slate-400">Đã chọn ảnh mẫu có sẵn của câu lệnh này làm ảnh tham chiếu</div>';
@@ -5275,9 +5352,18 @@ async function submitGenerateImage() {
         let uploadTarget = null;
         let uploadMsg = '';
 
+        let isKocDraft = false;
         if (currentRefSource === 'koc' && selectedKocImagePath) {
-            uploadTarget = selectedKocImagePath;
-            uploadMsg = 'Đang tải ảnh KOC lên S3...';
+            // Check if already an S3 URL
+            if (selectedKocImagePath.startsWith('http://') || selectedKocImagePath.startsWith('https://')) {
+                refImageUrl = selectedKocImagePath;
+                currentRefImageData = refImageUrl;
+                uploadTarget = null;
+            } else {
+                uploadTarget = selectedKocImagePath;
+                uploadMsg = 'Đang sao chép và tải ảnh KOC lên S3 (draft)...';
+                isKocDraft = true;
+            }
         } else if (currentRefSource === 'upload' && pendingUploadFileData) {
             uploadTarget = pendingUploadFileData;
             uploadMsg = 'Đang tải ảnh lên S3...';
@@ -5290,7 +5376,7 @@ async function submitGenerateImage() {
                 const uploadRes = await fetch('/api/reference-images/upload', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ image: uploadTarget })
+                    body: JSON.stringify({ image: uploadTarget, is_koc: isKocDraft })
                 });
                 const uploadData = await uploadRes.json();
                 if (!uploadRes.ok || !uploadData.url) {
@@ -5367,7 +5453,7 @@ function formatProgressDataToHtml(data) {
     const streamLogEl = document.getElementById('genStreamLog');
     const streamBadgeEl = document.getElementById('genStreamStatusBadge');
     if (streamLogEl) {
-        streamLogEl.innerHTML = '<div class="text-slate-400 font-mono">Đang khởi tạo kết nối SSE tới 9router...</div>';
+        streamLogEl.innerHTML = '<div class="text-slate-400 font-mono">Đang khởi tạo kết nối SSE...</div>';
     }
     if (streamBadgeEl) {
         streamBadgeEl.innerText = 'CONNECTING';
@@ -5656,6 +5742,89 @@ async function downloadCurrentGeneratedImage() {
     await triggerDirectDownload(currentGeneratedImageData, filename);
 }
 
+
+async function resizeImageToMaxDimension(dataUrlOrUrl, maxDim = 480) {
+    if (!dataUrlOrUrl || typeof dataUrlOrUrl !== 'string' || !dataUrlOrUrl.startsWith('data:image/')) {
+        return dataUrlOrUrl;
+    }
+    return new Promise((resolve) => {
+        const img = new Image();
+        img.onload = () => {
+            let { width, height } = img;
+            if (Math.max(width, height) > maxDim) {
+                const scale = maxDim / Math.max(width, height);
+                width = Math.max(1, Math.round(width * scale));
+                height = Math.max(1, Math.round(height * scale));
+            }
+            const canvas = document.createElement('canvas');
+            canvas.width = width;
+            canvas.height = height;
+            const ctx = canvas.getContext('2d');
+            ctx.drawImage(img, 0, 0, width, height);
+            resolve(canvas.toDataURL('image/png', 0.9));
+        };
+        img.onerror = () => resolve(dataUrlOrUrl);
+        img.src = dataUrlOrUrl;
+    });
+}
+
+async function saveGeneratedImageToKocGallery() {
+    if (!currentGeneratedImageData) {
+        showToast('Chưa có ảnh nào được tạo để lưu.');
+        return;
+    }
+
+    const btn = document.getElementById('btnSaveToKocGallery');
+    const btnText = document.getElementById('btnSaveToKocGalleryText');
+    const origText = 'Lưu vào KOC gallery';
+    if (btn) btn.disabled = true;
+    if (btnText) btnText.innerHTML = '<i class="fa-solid fa-circle-notch fa-spin text-sm"></i> Đang lưu...';
+
+    try {
+        const kocSelect = document.getElementById('genKocSelect');
+        const kocName = kocSelect ? kocSelect.value : '';
+
+        // Lấy đường dẫn tệp tham chiếu để lưu trực tiếp cùng thư mục
+        let refPath = '';
+        if (selectedKocImageObj) {
+            refPath = selectedKocImageObj.local_path || selectedKocImageObj.path || '';
+        } else if (selectedKocImagePath) {
+            refPath = selectedKocImagePath;
+        }
+
+        const res = await fetch('/api/koc/gallery/save', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                image: currentGeneratedImageData,
+                koc_name: kocName,
+                ref_path: refPath,
+                prompt_id: currentPromptId || null
+            })
+        });
+
+        const data = await res.json();
+        if (!res.ok) {
+            throw new Error(data.detail || 'Không thể lưu vào KOC');
+        }
+
+        showToast(data.message || 'Đã lưu ảnh vào thư mục KOC thành công!');
+        if (btnText) btnText.innerHTML = '<i class="fa-solid fa-check text-sm"></i> Đã lưu KOC!';
+
+        // Sau 5s tự động phục hồi về nhãn ban đầu "Lưu vào KOC gallery"
+        setTimeout(() => {
+            const currentBtnText = document.getElementById('btnSaveToKocGalleryText');
+            if (currentBtnText) currentBtnText.innerText = origText;
+        }, 5000);
+    } catch (err) {
+        console.error('Error saving to KOC gallery:', err);
+        showToast('Lỗi: ' + (err.message || 'Không thể lưu vào KOC'));
+        if (btnText) btnText.innerText = origText;
+    } finally {
+        if (btn) btn.disabled = false;
+    }
+}
+
 async function saveGeneratedImageToRecord() {
     if (!currentGeneratedImageData || !currentPromptId) {
         showToast('Chưa có ảnh hoặc bản ghi được chọn.');
@@ -5664,13 +5833,16 @@ async function saveGeneratedImageToRecord() {
 
     const btnSave = document.getElementById('btnSaveToRecord');
     btnSave.disabled = true;
-    btnSave.innerHTML = '<i class="fa-solid fa-circle-notch fa-spin text-sm"></i><span>Đang lưu vào bản ghi...</span>';
+    btnSave.innerHTML = '<i class="fa-solid fa-circle-notch fa-spin text-sm"></i><span>Đang xử lý & lưu ảnh...</span>';
 
     try {
+        // Resize ảnh về kích thước tối đa 480px trước khi gửi lên lưu S3 & bản ghi
+        const resizedImageData = await resizeImageToMaxDimension(currentGeneratedImageData, 480);
+
         const res = await fetch(`/api/prompts/${currentPromptId}/save-generated-image`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ image_data: currentGeneratedImageData })
+            body: JSON.stringify({ image_data: resizedImageData })
         });
 
         const data = await res.json();
@@ -5707,15 +5879,34 @@ async function saveGeneratedImageToRecord() {
             fetchStats();
         }
 
-        btnSave.className = 'flex-1 px-4 py-2.5 rounded-xl bg-emerald-600 text-white text-xs font-bold shadow-lg shadow-emerald-600/25 flex items-center justify-center gap-2 transition';
-        btnSave.innerHTML = '<i class="fa-solid fa-circle-check text-sm text-emerald-200"></i><span>Đã lưu vào bản ghi!</span>';
+        if (btnSave) {
+            btnSave.disabled = false;
+            btnSave.className = 'flex-1 px-4 py-2.5 rounded-xl bg-emerald-600 text-white text-xs font-bold shadow-lg shadow-emerald-600/25 flex items-center justify-center gap-2 transition';
+            btnSave.innerHTML = '<i class="fa-solid fa-circle-check text-sm text-emerald-200"></i><span>Đã lưu vào bản ghi!</span>';
+        }
         showToast('Đã thêm ảnh vào bộ sưu tập của câu lệnh này thành công!');
+
+        // Sau 5s tự động phục hồi về trạng thái ban đầu "Lưu vào bản ghi này"
+        const origClass = 'flex-1 px-3 py-2.5 rounded-xl bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-500 hover:to-purple-500 text-white text-xs font-bold shadow-lg shadow-indigo-600/25 flex items-center justify-center gap-2 transition active:scale-95';
+        const origHtml = '<i class="fa-solid fa-floppy-disk text-sm"></i><span id="btnSaveToRecordText">Lưu vào bản ghi này</span>';
+        setTimeout(() => {
+            const currentBtnSave = document.getElementById('btnSaveToRecord');
+            if (currentBtnSave) {
+                currentBtnSave.className = origClass;
+                currentBtnSave.innerHTML = origHtml;
+            }
+        }, 5000);
 
     } catch (err) {
         console.error('Error saving image to record:', err);
         showToast(`Lỗi khi lưu ảnh: ${err.message}`);
-        btnSave.disabled = false;
-        btnSave.innerHTML = '<i class="fa-solid fa-floppy-disk text-sm"></i><span>Lưu vào bản ghi này</span>';
+        const origClass = 'flex-1 px-3 py-2.5 rounded-xl bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-500 hover:to-purple-500 text-white text-xs font-bold shadow-lg shadow-indigo-600/25 flex items-center justify-center gap-2 transition active:scale-95';
+        const origHtml = '<i class="fa-solid fa-floppy-disk text-sm"></i><span id="btnSaveToRecordText">Lưu vào bản ghi này</span>';
+        if (btnSave) {
+            btnSave.disabled = false;
+            btnSave.className = origClass;
+            btnSave.innerHTML = origHtml;
+        }
     }
 }
 

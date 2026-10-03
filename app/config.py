@@ -66,6 +66,7 @@ _DEFAULT_CONFIG = {
     "s3_access_key_id": "",
     "s3_secret_access_key": "",
     "s3_key_prefix": "references",
+    "s3_koc_prefix": "koc_management",
     "setup_done": False,
 }
 
@@ -95,6 +96,7 @@ _ENV_KEY_MAP = {
     "S3_ACCESS_KEY_ID": "s3_access_key_id",
     "S3_SECRET_ACCESS_KEY": "s3_secret_access_key",
     "S3_KEY_PREFIX": "s3_key_prefix",
+    "S3_KOC_PREFIX": "s3_koc_prefix",
     "SETUP_DONE": "setup_done",
 }
 
@@ -145,7 +147,7 @@ def get_ai_config() -> dict:
               "image_url", "image_api_key", "video_url", "video_api_key",
               "model", "chat_model", "image_model", "image_type", "video_model",
               "s3_endpoint_url", "s3_region", "s3_bucket", "s3_access_key_id",
-              "s3_secret_access_key", "s3_key_prefix"):
+              "s3_secret_access_key", "s3_key_prefix", "s3_koc_prefix"):
         if isinstance(merged.get(k), str):
             merged[k] = merged[k].strip().strip('"').strip("'")
 

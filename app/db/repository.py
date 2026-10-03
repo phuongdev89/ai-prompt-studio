@@ -1,3 +1,5 @@
+import hashlib
+import urllib.parse
 import json
 import sqlite3
 from typing import List, Dict, Any, Optional, Tuple
@@ -440,7 +442,7 @@ class PromptRepository:
             for idx, img_item in enumerate(parsed_data.get("images", [])):
                 if img_item and isinstance(img_item, str):
                     img_item_clean = img_item.strip()
-                    if img_item_clean.startswith("data:image/"):
+                    if img_item_clean.startswith("data:"):
                         try:
                             header, b64_str = img_item_clean.split(",", 1)
                             ext = "png"
@@ -450,22 +452,57 @@ class PromptRepository:
                                 ext = "webp"
                             elif "gif" in header:
                                 ext = "gif"
+                            elif "mp4" in header:
+                                ext = "mp4"
+                            elif "webm" in header:
+                                ext = "webm"
 
-                            filename = f"{new_id}_upload_{idx + 1}.{ext}"
-                            file_path = IMAGES_DIR / filename
                             img_bytes = base64.b64decode(b64_str)
+                            md5_hex = hashlib.md5(img_bytes).hexdigest()
+                            filename = f"{md5_hex}.{ext}"
+                            file_path = IMAGES_DIR / filename
                             with open(file_path, "wb") as f:
                                 f.write(img_bytes)
 
                             local_path = f"images/{filename}"
                             file_size = len(img_bytes)
+                            target_url = local_path
+
+                            try:
+                                from app.services.s3_storage import is_configured, upload_content_to_s3
+                                from app.config import get_ai_config
+                                s3_cfg = get_ai_config()
+                                if is_configured(s3_cfg):
+                                    s3_res = upload_content_to_s3(
+                                        content=img_bytes,
+                                        filename=filename,
+                                        mime=f"image/{ext}" if ext not in ("mp4", "webm") else f"video/{ext}",
+                                        prefix=s3_cfg.get("s3_key_prefix", "ai_prompts_database"),
+                                        cfg=s3_cfg
+                                    )
+                                    target_url = s3_res.get("url") or local_path
+                            except Exception as s3_err:
+                                print(f"[!] S3 upload warning in create_prompt: {s3_err}")
 
                             cursor.execute("""
                                 INSERT INTO images (prompt_id, url, local_path, filename, status, file_size)
                                 VALUES (?, ?, ?, ?, 'downloaded', ?)
-                            """, (new_id, local_path, local_path, filename, file_size))
+                            """, (new_id, target_url, local_path, filename, file_size))
                         except Exception as e:
                             print(f"[!] Error saving uploaded base64 image: {e}")
+                    elif img_item_clean.startswith("http://") or img_item_clean.startswith("https://"):
+                        try:
+                            from app.services.s3_storage import is_s3_url
+                            if is_s3_url(img_item_clean):
+                                url_path = urllib.parse.urlparse(img_item_clean).path
+                                fname = Path(url_path).name or f"{new_id}_img_{idx + 1}.jpg"
+                                cursor.execute("""
+                                    INSERT INTO images (prompt_id, url, local_path, filename, status, file_size)
+                                    VALUES (?, ?, ?, ?, 'downloaded', 0)
+                                """, (new_id, img_item_clean, f"images/{fname}", fname))
+                                continue
+                        except Exception:
+                            pass
                     else:
                         filename = f"{new_id}_img_{idx + 1}.jpg"
                         local_path = f"images/{filename}"
@@ -627,7 +664,7 @@ class PromptRepository:
 
                 item_number = current_count + idx + 1
                 new_order = max_order + idx + 1
-                if img_item_clean.startswith("data:image/"):
+                if img_item_clean.startswith("data:"):
                     try:
                         header, b64_str = img_item_clean.split(",", 1)
                         ext = "png"
@@ -637,21 +674,42 @@ class PromptRepository:
                             ext = "webp"
                         elif "gif" in header:
                             ext = "gif"
+                        elif "mp4" in header:
+                            ext = "mp4"
+                        elif "webm" in header:
+                            ext = "webm"
 
-                        filename = f"{prompt_id}_add_{item_number}.{ext}"
-                        file_path = IMAGES_DIR / filename
                         img_bytes = base64.b64decode(b64_str)
+                        md5_hex = hashlib.md5(img_bytes).hexdigest()
+                        filename = f"{md5_hex}.{ext}"
+                        file_path = IMAGES_DIR / filename
                         with open(file_path, "wb") as f:
                             f.write(img_bytes)
 
                         local_path = f"images/{filename}"
                         file_size = len(img_bytes)
+                        target_url = local_path
+
+                        try:
+                            from app.services.s3_storage import is_configured, upload_content_to_s3
+                            from app.config import get_ai_config
+                            s3_cfg = get_ai_config()
+                            if is_configured(s3_cfg):
+                                s3_res = upload_content_to_s3(
+                                    content=img_bytes,
+                                    filename=filename,
+                                    mime=f"image/{ext}" if ext not in ("mp4", "webm") else f"video/{ext}",
+                                    prefix=s3_cfg.get("s3_key_prefix", "ai_prompts_database"),
+                                    cfg=s3_cfg
+                                )
+                                target_url = s3_res.get("url") or local_path
+                        except Exception as s3_err:
+                            print(f"[!] S3 upload warning in add_multiple_images: {s3_err}")
 
                         cursor.execute("""
                             INSERT INTO images (prompt_id, url, local_path, filename, status, file_size, order_index)
                             VALUES (?, ?, ?, ?, 'downloaded', ?, ?)
-                        """, (prompt_id, local_path, local_path, filename, file_size, new_order))
-                        added.append(filename)
+                        """, (prompt_id, target_url, local_path, filename, file_size, new_order))
                     except Exception as e:
                         print(f"[!] Error saving added base64 image: {e}")
                 else:

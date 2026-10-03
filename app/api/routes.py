@@ -1,4 +1,4 @@
-from fastapi import APIRouter, HTTPException, Query, Request, Body
+from fastapi import APIRouter, HTTPException, Query, Request, Body, UploadFile, File
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 from typing import Optional, List, Dict, Any
@@ -80,7 +80,20 @@ class GenerateVideoRequest(BaseModel):
     provider: Optional[str] = Field(None, description="Nhà cung cấp")
 
 class UploadReferenceImageRequest(BaseModel):
-    image: str = Field(..., description="Ảnh tham chiếu dạng data:image/...;base64,...")
+    image: str = Field(..., description="Ảnh tham chiếu dạng data:image/...;base64,... hoặc URL/path")
+    is_koc: Optional[bool] = Field(False, description="Đánh dấu ảnh chọn từ KOC list")
+
+class SaveKocGalleryRequest(BaseModel):
+    image: str = Field(..., description="Dữ liệu ảnh base64 hoặc URL")
+    koc_name: Optional[str] = Field("", description="Tên KOC")
+    ref_path: Optional[str] = Field(None, description="Đường dẫn tệp tham chiếu để lưu cùng thư mục")
+    prompt_id: Optional[str] = Field(None, description="ID bản ghi prompt liên quan")
+
+class S3UploadRequest(BaseModel):
+    data: Optional[str] = Field(None, description="Base64 data URI hoặc text")
+    filename: Optional[str] = Field(None, description="Tên tệp gốc")
+    mime: Optional[str] = Field(None, description="MIME type")
+    prefix: Optional[str] = Field(None, description="S3 prefix tùy chọn")
 
 class SaveGeneratedImageRequest(BaseModel):
     image_data: str = Field(..., description="URL hoặc Base64 ảnh đã tạo")
@@ -287,7 +300,10 @@ def toggle_prompt_reference_endpoint(prompt_id: str, payload: Dict[str, Any] = B
 
 @router.post("/reference-images/upload")
 def upload_reference_image_endpoint(payload: UploadReferenceImageRequest):
-    """Upload immediately after selection and return a 1-hour signed URL."""
+    """Upload immediately after selection and return a signed/direct S3 URL.
+    - If payload.is_koc is True and image is a local path, copies to temp with md5_file name and uploads to draft/ on S3.
+    - If image is already an S3 URL, returns it directly.
+    """
     from app.config import get_ai_config
     from app.services.s3_storage import upload_reference_image
 
@@ -295,11 +311,94 @@ def upload_reference_image_endpoint(payload: UploadReferenceImageRequest):
     if not cfg.get("s3_enabled"):
         raise HTTPException(status_code=409, detail="S3-compatible storage chưa được bật.")
     try:
-        return {"url": upload_reference_image(payload.image, cfg), "expires_in": 3600}
+        url = upload_reference_image(payload.image, cfg, is_koc=bool(payload.is_koc))
+        return {"url": url, "expires_in": 604800}
     except (ValueError, RuntimeError) as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except Exception as exc:
         raise HTTPException(status_code=502, detail=f"Không thể tải ảnh lên S3: {exc}") from exc
+
+
+@router.post("/s3/upload")
+async def s3_upload_endpoint(
+    request: Request,
+    file: Optional[UploadFile] = File(None)
+):
+    """Upload image or video directly to S3 immediately upon user file selection.
+    Always uses md5_file for filename.
+    """
+    import base64
+    from app.config import get_ai_config
+    from app.services.s3_storage import upload_content_to_s3
+
+    cfg = get_ai_config()
+    if not cfg.get("s3_enabled"):
+        raise HTTPException(status_code=409, detail="S3-compatible storage chưa được bật.")
+
+    content = None
+    filename = ""
+    mime = ""
+    prefix = ""
+
+    if file:
+        content = await file.read()
+        filename = file.filename or "upload.bin"
+        mime = file.content_type or ""
+    else:
+        try:
+            body = await request.json()
+            raw_data = (body.get("data") or body.get("image") or "").strip()
+            filename = body.get("filename") or "upload.png"
+            prefix = body.get("prefix") or ""
+            if raw_data.startswith("data:"):
+                header, encoded = raw_data.split(",", 1)
+                mime = header.split(";", 1)[0][5:] or "image/png"
+                content = base64.b64decode(encoded)
+            elif raw_data:
+                content = raw_data.encode("utf-8")
+        except Exception:
+            pass
+
+    if not content:
+        raise HTTPException(status_code=400, detail="Không có tệp hoặc dữ liệu để tải lên S3.")
+
+    try:
+        res = upload_content_to_s3(content=content, filename=filename, mime=mime, prefix=prefix, cfg=cfg)
+        return res
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Lỗi khi upload lên S3: {exc}") from exc
+
+
+@router.post("/koc/gallery/save")
+def save_koc_gallery_endpoint(payload: SaveKocGalleryRequest):
+    """Save newly generated image into local KOC directory alongside reference file (no S3)."""
+    from app.services.koc_service import save_image_to_koc_local
+    try:
+        res = save_image_to_koc_local(
+            image_data=payload.image,
+            koc_name=payload.koc_name or "",
+            ref_path=payload.ref_path or "",
+            prompt_id=payload.prompt_id or "",
+        )
+        return res
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Lỗi khi lưu vào thư mục KOC: {exc}") from exc
+
+
+@router.post("/s3/migrate-db-images")
+def migrate_db_images_endpoint():
+    """Migrate all existing local images in DB to S3 using MD5 filenames."""
+    from app.config import get_ai_config
+    from app.services.s3_storage import migrate_all_db_images_to_s3
+
+    cfg = get_ai_config()
+    if not cfg.get("s3_enabled"):
+        raise HTTPException(status_code=409, detail="S3-compatible storage chưa được bật.")
+    try:
+        res = migrate_all_db_images_to_s3(cfg)
+        return res
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Lỗi khi di chuyển ảnh lên S3: {exc}") from exc
 
 @router.delete("/prompts/{prompt_id}")
 @router.delete("/prompts/{prompt_id}/")
@@ -1507,8 +1606,11 @@ def get_koc_images(name: str = Query(..., description="Tên KOC cần lấy ản
 
 
 @router.get("/koc/image")
-def serve_koc_image(path: str = Query(..., description="Đường dẫn tuyệt đối của tệp ảnh KOC")):
-    """Trả về file ảnh KOC để hiển thị preview trên giao diện người dùng."""
+def serve_koc_image(path: str = Query(..., description="Đường dẫn tệp ảnh KOC hoặc URL S3 Presigned")):
+    """Trả về file ảnh KOC để hiển thị preview. Chuyển hướng trực tiếp nếu là URL S3."""
+    if path.startswith(("http://", "https://")):
+        from fastapi.responses import RedirectResponse
+        return RedirectResponse(url=path, status_code=307)
     try:
         from app.services.koc_service import validate_image_path
         file_path = validate_image_path(path)
