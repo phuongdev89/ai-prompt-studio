@@ -25,14 +25,8 @@ def get_db():
     finally:
         conn.close()
 
-def _migrate_from_json(json_path, db_path):
-    import json
-    if not json_path.exists():
-        return
-    with open(json_path, "r", encoding="utf-8") as f:
-        prompts = json.load(f)
-    conn = sqlite3.connect(db_path)
-    cursor = conn.cursor()
+def init_schema(cursor):
+    """Khởi tạo toàn bộ các bảng cơ bản nếu chưa tồn tại."""
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS prompts (
             id TEXT PRIMARY KEY,
@@ -71,6 +65,49 @@ def _migrate_from_json(json_path, db_path):
             FOREIGN KEY (prompt_id) REFERENCES prompts(id) ON DELETE CASCADE
         )
     """)
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS sample_contents (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            prompt_id TEXT NOT NULL,
+            content TEXT NOT NULL,
+            title TEXT DEFAULT '',
+            order_index INTEGER DEFAULT 0,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (prompt_id) REFERENCES prompts(id) ON DELETE CASCADE
+        )
+    """)
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS prompt_tags (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            prompt_id TEXT NOT NULL,
+            tag TEXT NOT NULL COLLATE NOCASE,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (prompt_id) REFERENCES prompts(id) ON DELETE CASCADE,
+            UNIQUE(prompt_id, tag)
+        )
+    """)
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS sync_meta (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            last_sync_time TIMESTAMP,
+            sync_version TEXT
+        )
+    """)
+
+def _migrate_from_json(json_path, db_path):
+    import json
+    conn = sqlite3.connect(db_path)
+    cursor = conn.cursor()
+    init_schema(cursor)
+
+    if not json_path or not json_path.exists():
+        conn.commit()
+        conn.close()
+        return
+
+    with open(json_path, "r", encoding="utf-8") as f:
+        prompts = json.load(f)
+
     prompt_rows, image_rows, field_rows = [], [], []
     for item in prompts:
         p_id = item.get("id")
@@ -89,11 +126,12 @@ def _migrate_from_json(json_path, db_path):
     conn.close()
 
 def ensure_database():
-    from app.config import get_bundled_db_path, DATA_DIR, IMAGES_DIR
+    from app.config import get_bundled_db_path, DATA_DIR, IMAGES_DIR, THUMBNAILS_DIR
     import shutil
 
     DATA_DIR.mkdir(parents=True, exist_ok=True)
     IMAGES_DIR.mkdir(parents=True, exist_ok=True)
+    THUMBNAILS_DIR.mkdir(parents=True, exist_ok=True)
 
     if not DB_PATH.exists():
         print(f"[!] Database not found at {DB_PATH}. Initializing...")
@@ -109,13 +147,17 @@ def ensure_database():
         if not copied:
             _migrate_from_json(JSON_DATA_PATH, DB_PATH)
     else:
-        # Check if tables exist
-        with get_db() as conn:
-            cursor = conn.cursor()
-            cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='prompts'")
-            if not cursor.fetchone():
-                print("[!] Tables not found in database. Initializing...")
-                _migrate_from_json(JSON_DATA_PATH, DB_PATH)
+        # Check if tables exist, if not initialize
+        conn = sqlite3.connect(DB_PATH)
+        cursor = conn.cursor()
+        init_schema(cursor)
+        cursor.execute("SELECT COUNT(*) FROM prompts")
+        cnt = cursor.fetchone()[0]
+        conn.commit()
+        conn.close()
+        if cnt == 0 and JSON_DATA_PATH.exists():
+            print("[!] Empty database found. Populating from JSON...")
+            _migrate_from_json(JSON_DATA_PATH, DB_PATH)
 
     # Ensure columns and tables exist
     with get_db() as conn:

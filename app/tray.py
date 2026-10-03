@@ -124,9 +124,7 @@ def is_port_available(port: int, host: str = "127.0.0.1") -> bool:
 
 
 def find_free_port(host: str = "127.0.0.1") -> int:
-    """Ưu tiên cổng 8000, nếu bị chiếm thì lấy cổng trống ngẫu nhiên."""
-    if is_port_available(8000, host):
-        return 8000
+    """Cấp một cổng ngẫu nhiên trống từ hệ điều hành mỗi khi chạy."""
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
         s.bind((host, 0))
         return s.getsockname()[1]
