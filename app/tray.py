@@ -39,7 +39,7 @@ CACHE_DIR = ROOT_DIR / ".cache"
 CACHE_DIR.mkdir(parents=True, exist_ok=True)
 LOG_FILE_PATH = CACHE_DIR / "server.log"
 URL_FILE_PATH = CACHE_DIR / "server.url"
-ICON_PATH = ROOT_DIR / "assets" / "icon.png"
+ICON_PATH = ROOT_DIR / "public" / "favicon.png"
 
 MUTEX_NAME = r"Local\AIPromptStudio_SingleInstance"
 ERROR_ALREADY_EXISTS = 183
@@ -85,16 +85,12 @@ def create_default_icon_image(size: int = 64) -> Image.Image:
 
 
 def load_icon_image() -> Image.Image:
-    """Nạp icon từ assets/icon.ico hoặc icon.png."""
+    """Nạp icon từ public/favicon.png hoặc favicon.ico."""
     candidates = [
-        ROOT_DIR / "assets" / "icon.ico",
-        ROOT_DIR / "assets" / "icon.png",
-        ROOT_DIR / "_internal" / "assets" / "icon.ico",
-        ROOT_DIR / "_internal" / "assets" / "icon.png",
-        ROOT_DIR / "app" / "static" / "favicon.png",
-        ROOT_DIR / "app" / "static" / "favicon.ico",
-        ROOT_DIR / "_internal" / "app" / "static" / "favicon.png",
-        ROOT_DIR / "_internal" / "app" / "static" / "favicon.ico",
+        ROOT_DIR / "public" / "favicon.png",
+        ROOT_DIR / "public" / "favicon.ico",
+        ROOT_DIR / "_internal" / "public" / "favicon.png",
+        ROOT_DIR / "_internal" / "public" / "favicon.ico",
     ]
     for p in candidates:
         if p.exists():

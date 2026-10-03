@@ -9,8 +9,9 @@ if getattr(sys, "frozen", False):
     BASE_DIR = Path(sys.executable).resolve().parent
     _INTERNAL = BASE_DIR / "_internal"
     APP_DIR = _INTERNAL / "app"
-    STATIC_DIR = APP_DIR / "static"
-    TEMPLATES_DIR = APP_DIR / "templates"
+    PUBLIC_DIR = _INTERNAL / "public" if (_INTERNAL / "public").exists() else BASE_DIR / "public"
+    STATIC_DIR = PUBLIC_DIR
+    TEMPLATES_DIR = PUBLIC_DIR
     DATA_DIR = BASE_DIR / "data"
     _INTERNAL_DATA = _INTERNAL / "data"
     JSON_DATA_PATH = DATA_DIR / "cleaned_prompts.json" if (DATA_DIR / "cleaned_prompts.json").exists() else _INTERNAL_DATA / "cleaned_prompts.json"
@@ -18,13 +19,14 @@ else:
     BASE_DIR = Path(__file__).resolve().parent.parent
     _INTERNAL = BASE_DIR
     APP_DIR = BASE_DIR / "app"
-    STATIC_DIR = APP_DIR / "static"
-    TEMPLATES_DIR = APP_DIR / "templates"
+    PUBLIC_DIR = BASE_DIR / "public"
+    STATIC_DIR = PUBLIC_DIR
+    TEMPLATES_DIR = PUBLIC_DIR
     DATA_DIR = BASE_DIR / "data"
     JSON_DATA_PATH = DATA_DIR / "cleaned_prompts.json"
 
 DATA_DIR.mkdir(parents=True, exist_ok=True)
-DB_PATH = DATA_DIR / "prompts.db"
+DB_PATH = Path(os.environ["DB_PATH"]).resolve() if os.environ.get("DB_PATH") else (DATA_DIR / "prompts.db")
 IMAGES_DIR = DATA_DIR / "images"
 IMAGES_DIR.mkdir(parents=True, exist_ok=True)
 THUMBNAILS_DIR = DATA_DIR / "thumbnails"

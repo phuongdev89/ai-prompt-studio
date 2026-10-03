@@ -40,9 +40,7 @@ hidden_imports = [
 ] + collect_submodules('app')
 
 datas = [
-    (os.path.join(ROOT_DIR, 'app', 'templates'), 'app/templates'),
-    (os.path.join(ROOT_DIR, 'app', 'static'), 'app/static'),
-    (os.path.join(ROOT_DIR, 'assets'), 'assets'),
+    (os.path.join(ROOT_DIR, 'public'), 'public'),
 ]
 
 # .version file
@@ -57,7 +55,7 @@ try:
 except ImportError:
     pass
 
-icon_path = os.path.join(ROOT_DIR, 'assets', 'icon.ico')
+icon_path = os.path.join(ROOT_DIR, 'public', 'favicon.ico')
 icon_file = icon_path if os.path.exists(icon_path) else None
 
 a = Analysis(

@@ -33,7 +33,7 @@ PrivilegesRequired=lowest
 
 OutputDir=..\dist
 OutputBaseFilename=AI_Prompt_Studio_Patch_v{#MyAppVersion}
-SetupIconFile=..\assets\icon.ico
+SetupIconFile=..\public\favicon.ico
 Compression=lzma2/ultra64
 SolidCompression=yes
 WizardStyle=modern

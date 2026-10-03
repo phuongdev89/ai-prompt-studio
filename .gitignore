@@ -49,5 +49,10 @@ data/images/*
 # Agents
 .agents/
 .claude
-scratch
 .cache
+
+# Scratch & Temporary
+.scratch/
+.scratch
+scratch/
+scratch

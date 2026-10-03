@@ -1,128 +1,41 @@
 from fastapi import APIRouter, HTTPException, Query, Request, Body, UploadFile, File
 from fastapi.responses import FileResponse
-from pydantic import BaseModel, Field
 from typing import Optional, List, Dict, Any
 from app.db.repository import PromptRepository
 from app.services.parser import parse_incoming_prompt
 from app.services.downloader import download_prompt_images_now
+from app.api.schemas import (
+    CreatePromptRequest,
+    UpdatePromptRequest,
+    SetPrimaryFieldRequest,
+    GenerateContentRequest,
+    AddSampleContentRequest,
+    ReorderSampleContentsRequest,
+    ImprovePromptRequest,
+    SaveImprovedPromptRequest,
+    ExtractJsonFromImageRequest,
+    GenerateImageRequest,
+    GenerateVideoRequest,
+    UploadReferenceImageRequest,
+    SaveKocGalleryRequest,
+    S3UploadRequest,
+    SaveGeneratedImageRequest,
+    AddImagesRequest,
+    ReorderImagesRequest,
+    DeleteImageRequest,
+    AddTagRequest,
+    AssistantChatRequest,
+    CompactPromptRequest,
+    PromptListResponse,
+    StatsResponse,
+    TagListResponse,
+    StatusResponse,
+)
 
 router = APIRouter(prefix="/api", tags=["prompts"])
 
-class CreatePromptRequest(BaseModel):
-    prompt: Optional[str] = Field("", description="Nội dung câu lệnh (JSON hoặc Text)")
-    title: Optional[str] = Field(None, description="Tiêu đề câu lệnh tùy chỉnh")
-    media: Optional[str] = Field(None, description="URL hoặc đường dẫn ảnh/video kết quả mẫu")
-    images: Optional[List[str]] = Field(None, description="Danh sách URL hoặc Base64 ảnh tải lên từ máy tính")
-    category: Optional[str] = Field("image", description="Loại prompt: 'image', 'video' hoặc 'content'")
-    note: Optional[str] = Field("", description="Ghi chú / chú thích cho câu lệnh")
-    sample_content: Optional[str] = Field(None, description="Nội dung kết quả mẫu dạng văn bản")
-    requires_reference: Optional[bool] = Field(None, description="Cờ yêu cầu ảnh tham chiếu (mặc định bật cho prompt ảnh)")
-    scenes: Optional[List[Dict[str, str]]] = Field(None, description="Danh sách cảnh video (dialogue, action, camera)")
-
-class SetPrimaryFieldRequest(BaseModel):
-    is_primary: bool = Field(..., description="Cờ đánh dấu thuộc tính chính")
-
-class GenerateContentRequest(BaseModel):
-    prompt: str = Field(..., description="Nội dung câu lệnh prompt")
-    extra_instruction: Optional[str] = Field(None, description="Yêu cầu bổ sung cho AI")
-    provider: Optional[str] = Field(None, description="Nhà cung cấp: 'openai'")
-
-class AddSampleContentRequest(BaseModel):
-    content: str = Field(..., description="Nội dung văn bản mẫu")
-    title: Optional[str] = Field("", description="Tiêu đề mẫu (tùy chọn)")
-
-class ReorderSampleContentsRequest(BaseModel):
-    ordered_ids: List[int] = Field(..., description="Danh sách ID mẫu theo thứ tự hiển thị mới")
-
-class UpdatePromptRequest(BaseModel):
-    title: Optional[str] = None
-    prompt_code: Optional[str] = None
-    note: Optional[str] = None
-    category: Optional[str] = None
-    requires_reference: Optional[bool] = None
-    fields: Optional[List[Dict[str, Any]]] = None
-
-class ImprovePromptRequest(BaseModel):
-    instruction: str = Field(..., description="Yêu cầu cải tiến của người dùng")
-    provider: Optional[str] = Field(None, description="Nhà cung cấp AI: 'openai'")
-    auto_save: Optional[bool] = Field(False, description="Tự động lưu đè vào bản ghi sau khi cải tiến thành công (mặc định False)")
-
-class SaveImprovedPromptRequest(BaseModel):
-    mode: str = Field("overwrite", description="Chế độ lưu: 'overwrite' hoặc 'new_version'")
-    title: Optional[str] = None
-    prompt_code: str = Field(..., description="Nội dung câu lệnh prompt mới")
-    raw_content: Optional[str] = None
-    prompt_type: Optional[str] = "json"
-    parsed_json: Optional[Dict[str, Any]] = None
-    fields: Optional[List[Dict[str, Any]]] = None
-
-class ExtractJsonFromImageRequest(BaseModel):
-    image: str = Field(..., description="Base64 hoặc URL của ảnh cần trích xuất JSON VisionStruct")
-    provider: Optional[str] = Field(None, description="Nhà cung cấp: 'openai'")
-
-class GenerateImageRequest(BaseModel):
-    prompt: str = Field(..., description="Nội dung câu lệnh tạo ảnh")
-    model: Optional[str] = Field(None, description="Tên mô hình AI tạo ảnh được chọn từ danh sách")
-    reference_image: Optional[str] = Field(None, description="Chuỗi Base64 hoặc URL ảnh tham chiếu")
-    extra_description: Optional[str] = Field(None, description="Mô tả phụ bổ sung")
-    size: Optional[str] = Field("1024x1024", description="Kích thước ảnh")
-    quality: Optional[str] = Field("hd", description="Chất lượng ảnh")
-    image_detail: Optional[str] = Field("high", description="Mức độ bám sát chi tiết ảnh tham chiếu")
-    provider: Optional[str] = Field(None, description="Nhà cung cấp: 'openai'")
-
-class GenerateVideoRequest(BaseModel):
-    prompt: str = Field(..., description="Nội dung câu lệnh render video cảnh này")
-    model: Optional[str] = Field(None, description="Tên mô hình AI tạo video")
-    ratio: Optional[str] = Field("9:16", description="Tỷ lệ khung hình: '9:16' hoặc '16:9'")
-    duration: Optional[int] = Field(6, description="Thời lượng cảnh tính bằng giây: 4, 6, 8, 10")
-    reference_media: Optional[str] = Field(None, description="Ảnh hoặc video tham chiếu")
-    scene_number: Optional[int] = Field(None, description="Số thứ tự cảnh")
-    provider: Optional[str] = Field(None, description="Nhà cung cấp")
-
-class UploadReferenceImageRequest(BaseModel):
-    image: str = Field(..., description="Ảnh tham chiếu dạng data:image/...;base64,... hoặc URL/path")
-    is_koc: Optional[bool] = Field(False, description="Đánh dấu ảnh chọn từ KOC list")
-
-class SaveKocGalleryRequest(BaseModel):
-    image: str = Field(..., description="Dữ liệu ảnh base64 hoặc URL")
-    koc_name: Optional[str] = Field("", description="Tên KOC")
-    ref_path: Optional[str] = Field(None, description="Đường dẫn tệp tham chiếu để lưu cùng thư mục")
-    prompt_id: Optional[str] = Field(None, description="ID bản ghi prompt liên quan")
-
-class S3UploadRequest(BaseModel):
-    data: Optional[str] = Field(None, description="Base64 data URI hoặc text")
-    filename: Optional[str] = Field(None, description="Tên tệp gốc")
-    mime: Optional[str] = Field(None, description="MIME type")
-    prefix: Optional[str] = Field(None, description="S3 prefix tùy chọn")
-
-class SaveGeneratedImageRequest(BaseModel):
-    image_data: str = Field(..., description="URL hoặc Base64 ảnh đã tạo")
-
-class AddImagesRequest(BaseModel):
-    images: Optional[List[str]] = Field(default_factory=list, description="Danh sách Base64 ảnh hoặc URLs")
-    media: Optional[str] = Field(None, description="Chuỗi URLs phân cách bằng dấu phẩy hoặc xuống dòng")
-
-class ReorderImagesRequest(BaseModel):
-    image_ids: List[int] = Field(..., description="Danh sách ID ảnh theo thứ tự mới")
-
-class DeleteImageRequest(BaseModel):
-    image_id: Optional[int] = Field(None, description="ID ảnh cần xóa")
-
-class AddTagRequest(BaseModel):
-    tag: str = Field(..., min_length=1, max_length=50, description="Tên thẻ tag cần thêm")
-
-class AssistantChatRequest(BaseModel):
-    message: str = Field(..., description="Nội dung câu hỏi / yêu cầu tìm kiếm của người dùng")
-    history: Optional[List[Dict[str, Any]]] = Field(default_factory=list, description="Lịch sử chat gần nhất")
-    category: Optional[str] = Field("all", description="Bộ lọc danh mục: 'all', 'image' hoặc 'content'")
-    provider: Optional[str] = Field(None, description="Nhà cung cấp AI: 'openai'")
-
-class CompactPromptRequest(BaseModel):
-    prompt: Optional[str] = Field(None, description="Tùy chọn: câu lệnh tùy biến cần rút gọn")
-    force_refresh: Optional[bool] = Field(False, description="Bắt buộc gọi AI sinh lại kể cả khi đã có trong DB")
-
-@router.get("/prompts")
-@router.get("/prompts/")
+@router.get("/prompts", response_model=PromptListResponse, summary="Tra cứu danh sách câu lệnh prompt")
+@router.get("/prompts/", response_model=PromptListResponse, include_in_schema=False)
 def list_prompts(
     q: Optional[str] = Query(None, description="Search keyword"),
     tag: str = Query("all", description="Tag filter: all, has_img, has_sample, storyboard, portrait, video, seo, live"),
@@ -130,6 +43,10 @@ def list_prompts(
     limit: Optional[int] = Query(None, description="Limit results"),
     offset: int = Query(0, description="Offset results")
 ):
+    """
+    Lấy danh sách các câu lệnh prompt trong cơ sở dữ liệu.
+    Hỗ trợ tìm kiếm từ khóa mờ, phân loại theo danh mục (image, video, content) và lọc theo tags.
+    """
     query_val = q if isinstance(q, str) else None
     tag_val = tag if isinstance(tag, str) else "all"
     cat_val = category if isinstance(category, str) else "image"
@@ -1258,9 +1175,14 @@ def delete_prompt_image(prompt_id: str, image_id: Optional[int] = None, payload:
         "prompt": refreshed
     }
 
-@router.get("/stats")
-@router.get("/stats/")
+@router.get("/stats", response_model=StatsResponse, summary="Thống kê cơ sở dữ liệu prompts")
+@router.get("/stats/", response_model=StatsResponse, include_in_schema=False)
 def get_stats():
+    """
+    Trả về số liệu thống kê tổng thể của hệ thống:
+    - Tổng số prompts và phân bố theo danh mục, loại prompt.
+    - Tổng số ảnh mẫu, trạng thái ảnh đã tải xuống hoặc đang chờ tải.
+    """
     return PromptRepository.get_stats()
 
 @router.get("/config/providers")

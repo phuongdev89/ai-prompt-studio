@@ -1,0 +1,4209 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "AI Prompt Studio API",
+    "description": "\n### Hệ sinh thái Quản lý & Tùy biến Câu lệnh Prompt AI Đa Năng\nHỗ trợ cả giao diện đồ họa Web SPA và giao diện dòng lệnh Headless CLI (`aff-prompt`).\n- **Core Database:** SQLite lưu trữ 400+ prompt tối ưu hóa cho hình ảnh, video storyboard và nội dung tiếp thị.\n- **AI Integrations:** OpenAI, Midjourney, Kling, Veo, Gemini, Seedance.\n- **Headless First:** Vận hành độc lập qua lệnh `aff-prompt` với định dạng `--json` tiêu chuẩn.\n    ",
+    "version": "1.1.0"
+  },
+  "paths": {
+    "/api/prompts": {
+      "get": {
+        "tags": [
+          "prompts"
+        ],
+        "summary": "Tra cứu danh sách câu lệnh prompt",
+        "description": "Lấy danh sách các câu lệnh prompt trong cơ sở dữ liệu.\nHỗ trợ tìm kiếm từ khóa mờ, phân loại theo danh mục (image, video, content) và lọc theo tags.",
+        "operationId": "list_prompts_api_prompts_get",
+        "parameters": [
+          {
+            "name": "q",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Search keyword",
+              "title": "Q"
+            },
+            "description": "Search keyword"
+          },
+          {
+            "name": "tag",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "description": "Tag filter: all, has_img, has_sample, storyboard, portrait, video, seo, live",
+              "default": "all",
+              "title": "Tag"
+            },
+            "description": "Tag filter: all, has_img, has_sample, storyboard, portrait, video, seo, live"
+          },
+          {
+            "name": "category",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Filter by category: 'image' or 'content'",
+              "default": "image",
+              "title": "Category"
+            },
+            "description": "Filter by category: 'image' or 'content'"
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Limit results",
+              "title": "Limit"
+            },
+            "description": "Limit results"
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "description": "Offset results",
+              "default": 0,
+              "title": "Offset"
+            },
+            "description": "Offset results"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PromptListResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "prompts"
+        ],
+        "summary": "Create Prompt",
+        "operationId": "create_prompt_api_prompts_post",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreatePromptRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/prompts/": {
+      "post": {
+        "tags": [
+          "prompts"
+        ],
+        "summary": "Create Prompt",
+        "operationId": "create_prompt_api_prompts__post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreatePromptRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/prompts/{prompt_id}/": {
+      "get": {
+        "tags": [
+          "prompts"
+        ],
+        "summary": "Get Prompt",
+        "operationId": "get_prompt_api_prompts__prompt_id___get",
+        "parameters": [
+          {
+            "name": "prompt_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Prompt Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "patch": {
+        "tags": [
+          "prompts"
+        ],
+        "summary": "Update Prompt",
+        "operationId": "update_prompt_api_prompts__prompt_id___patch",
+        "parameters": [
+          {
+            "name": "prompt_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Prompt Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdatePromptRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "prompts"
+        ],
+        "summary": "Update Prompt",
+        "operationId": "update_prompt_api_prompts__prompt_id___post",
+        "parameters": [
+          {
+            "name": "prompt_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Prompt Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdatePromptRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "prompts"
+        ],
+        "summary": "Update Prompt",
+        "operationId": "update_prompt_api_prompts__prompt_id___put",
+        "parameters": [
+          {
+            "name": "prompt_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Prompt Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdatePromptRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "prompts"
+        ],
+        "summary": "Delete Prompt",
+        "operationId": "delete_prompt_api_prompts__prompt_id___delete",
+        "parameters": [
+          {
+            "name": "prompt_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Prompt Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/prompts/{prompt_id}": {
+      "get": {
+        "tags": [
+          "prompts"
+        ],
+        "summary": "Get Prompt",
+        "operationId": "get_prompt_api_prompts__prompt_id__get",
+        "parameters": [
+          {
+            "name": "prompt_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Prompt Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "patch": {
+        "tags": [
+          "prompts"
+        ],
+        "summary": "Update Prompt",
+        "operationId": "update_prompt_api_prompts__prompt_id__patch",
+        "parameters": [
+          {
+            "name": "prompt_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Prompt Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdatePromptRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "prompts"
+        ],
+        "summary": "Update Prompt",
+        "operationId": "update_prompt_api_prompts__prompt_id__post",
+        "parameters": [
+          {
+            "name": "prompt_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Prompt Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdatePromptRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "prompts"
+        ],
+        "summary": "Update Prompt",
+        "operationId": "update_prompt_api_prompts__prompt_id__put",
+        "parameters": [
+          {
+            "name": "prompt_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Prompt Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdatePromptRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "prompts"
+        ],
+        "summary": "Delete Prompt",
+        "operationId": "delete_prompt_api_prompts__prompt_id__delete",
+        "parameters": [
+          {
+            "name": "prompt_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Prompt Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/prompts/{prompt_id}/category": {
+      "post": {
+        "tags": [
+          "prompts"
+        ],
+        "summary": "Update Prompt Category Endpoint",
+        "operationId": "update_prompt_category_endpoint_api_prompts__prompt_id__category_post",
+        "parameters": [
+          {
+            "name": "prompt_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Prompt Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": true,
+                "default": {},
+                "title": "Payload"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/prompts/{prompt_id}/toggle-reference": {
+      "post": {
+        "tags": [
+          "prompts"
+        ],
+        "summary": "Toggle Prompt Reference Endpoint",
+        "operationId": "toggle_prompt_reference_endpoint_api_prompts__prompt_id__toggle_reference_post",
+        "parameters": [
+          {
+            "name": "prompt_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Prompt Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": true,
+                "default": {},
+                "title": "Payload"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/reference-images/upload": {
+      "post": {
+        "tags": [
+          "prompts"
+        ],
+        "summary": "Upload Reference Image Endpoint",
+        "description": "Upload immediately after selection and return a signed/direct S3 URL.\n- If payload.is_koc is True and image is a local path, copies to temp with md5_file name and uploads to draft/ on S3.\n- If image is already an S3 URL, returns it directly.",
+        "operationId": "upload_reference_image_endpoint_api_reference_images_upload_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UploadReferenceImageRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/s3/upload": {
+      "post": {
+        "tags": [
+          "prompts"
+        ],
+        "summary": "S3 Upload Endpoint",
+        "description": "Upload image or video directly to S3 immediately upon user file selection.\nAlways uses md5_file for filename.",
+        "operationId": "s3_upload_endpoint_api_s3_upload_post",
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_s3_upload_endpoint_api_s3_upload_post"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/koc/gallery/save": {
+      "post": {
+        "tags": [
+          "prompts"
+        ],
+        "summary": "Save Koc Gallery Endpoint",
+        "description": "Save newly generated image into local KOC directory alongside reference file (no S3).",
+        "operationId": "save_koc_gallery_endpoint_api_koc_gallery_save_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SaveKocGalleryRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/s3/migrate-db-images": {
+      "post": {
+        "tags": [
+          "prompts"
+        ],
+        "summary": "Migrate Db Images Endpoint",
+        "description": "Migrate all existing local images in DB to S3 using MD5 filenames.",
+        "operationId": "migrate_db_images_endpoint_api_s3_migrate_db_images_post",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/s3/presign": {
+      "get": {
+        "tags": [
+          "prompts"
+        ],
+        "summary": "Presign S3 Url Endpoint",
+        "description": "Sinh presigned URL 24h cho S3 bucket private.",
+        "operationId": "presign_s3_url_endpoint_api_s3_presign_get",
+        "parameters": [
+          {
+            "name": "url",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "description": "S3 URL or key to presign",
+              "title": "Url"
+            },
+            "description": "S3 URL or key to presign"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/media/proxy": {
+      "get": {
+        "tags": [
+          "prompts"
+        ],
+        "summary": "Media Proxy Endpoint",
+        "description": "Proxy hiển thị ảnh/video: lưu thumbnail vào thư mục và tái sử dụng từ đĩa cục bộ.",
+        "operationId": "media_proxy_endpoint_api_media_proxy_get",
+        "parameters": [
+          {
+            "name": "url",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "description": "Media URL or key to proxy",
+              "title": "Url"
+            },
+            "description": "Media URL or key to proxy"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/prompts/{prompt_id}/delete": {
+      "post": {
+        "tags": [
+          "prompts"
+        ],
+        "summary": "Delete Prompt",
+        "operationId": "delete_prompt_api_prompts__prompt_id__delete_post",
+        "parameters": [
+          {
+            "name": "prompt_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Prompt Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/prompts/{prompt_id}/fields/{field_id}/primary": {
+      "post": {
+        "tags": [
+          "prompts"
+        ],
+        "summary": "Toggle Field Primary",
+        "operationId": "toggle_field_primary_api_prompts__prompt_id__fields__field_id__primary_post",
+        "parameters": [
+          {
+            "name": "prompt_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Prompt Id"
+            }
+          },
+          {
+            "name": "field_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Field Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SetPrimaryFieldRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/prompts/{prompt_id}/suggest-primary-fields": {
+      "post": {
+        "tags": [
+          "prompts"
+        ],
+        "summary": "Suggest Primary Fields Endpoint",
+        "operationId": "suggest_primary_fields_endpoint_api_prompts__prompt_id__suggest_primary_fields_post",
+        "parameters": [
+          {
+            "name": "prompt_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Prompt Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/prompts/{prompt_id}/generate-content": {
+      "post": {
+        "tags": [
+          "prompts"
+        ],
+        "summary": "Generate Content For Prompt",
+        "operationId": "generate_content_for_prompt_api_prompts__prompt_id__generate_content_post",
+        "parameters": [
+          {
+            "name": "prompt_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Prompt Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GenerateContentRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/prompts/{prompt_id}/sample-contents": {
+      "post": {
+        "tags": [
+          "prompts"
+        ],
+        "summary": "Add Sample Content Endpoint",
+        "operationId": "add_sample_content_endpoint_api_prompts__prompt_id__sample_contents_post",
+        "parameters": [
+          {
+            "name": "prompt_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Prompt Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AddSampleContentRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/prompts/{prompt_id}/sample-contents/{content_id}/delete": {
+      "post": {
+        "tags": [
+          "prompts"
+        ],
+        "summary": "Delete Sample Content Endpoint",
+        "operationId": "delete_sample_content_endpoint_api_prompts__prompt_id__sample_contents__content_id__delete_post",
+        "parameters": [
+          {
+            "name": "prompt_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Prompt Id"
+            }
+          },
+          {
+            "name": "content_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Content Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/prompts/{prompt_id}/sample-contents/{content_id}": {
+      "delete": {
+        "tags": [
+          "prompts"
+        ],
+        "summary": "Delete Sample Content Endpoint",
+        "operationId": "delete_sample_content_endpoint_api_prompts__prompt_id__sample_contents__content_id__delete",
+        "parameters": [
+          {
+            "name": "prompt_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Prompt Id"
+            }
+          },
+          {
+            "name": "content_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Content Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/prompts/{prompt_id}/sample-contents/reorder": {
+      "post": {
+        "tags": [
+          "prompts"
+        ],
+        "summary": "Reorder Sample Contents Endpoint",
+        "operationId": "reorder_sample_contents_endpoint_api_prompts__prompt_id__sample_contents_reorder_post",
+        "parameters": [
+          {
+            "name": "prompt_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Prompt Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReorderSampleContentsRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/prompts/{prompt_id}/convert-json": {
+      "post": {
+        "tags": [
+          "prompts"
+        ],
+        "summary": "Convert Prompt To Json",
+        "operationId": "convert_prompt_to_json_api_prompts__prompt_id__convert_json_post",
+        "parameters": [
+          {
+            "name": "prompt_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Prompt Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/prompts/{prompt_id}/analyze-script": {
+      "post": {
+        "tags": [
+          "prompts"
+        ],
+        "summary": "Analyze Prompt Script Endpoint",
+        "description": "Phân tích văn bản thô thành kịch bản phân cảnh video chuẩn điện ảnh.",
+        "operationId": "analyze_prompt_script_endpoint_api_prompts__prompt_id__analyze_script_post",
+        "parameters": [
+          {
+            "name": "prompt_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Prompt Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/prompts/{prompt_id}/extract-json-from-image": {
+      "post": {
+        "tags": [
+          "prompts"
+        ],
+        "summary": "Extract Json From Image Endpoint",
+        "operationId": "extract_json_from_image_endpoint_api_prompts__prompt_id__extract_json_from_image_post",
+        "parameters": [
+          {
+            "name": "prompt_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Prompt Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ExtractJsonFromImageRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/prompts/extract-json-from-uploaded-image": {
+      "post": {
+        "tags": [
+          "prompts"
+        ],
+        "summary": "Extract Json From Uploaded Image Endpoint",
+        "description": "Phân tích ảnh upload từ client (base64) để trích xuất JSON VisionStruct điền vào form thêm mới.",
+        "operationId": "extract_json_from_uploaded_image_endpoint_api_prompts_extract_json_from_uploaded_image_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ExtractJsonFromImageRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/prompts/{prompt_id}/compact": {
+      "get": {
+        "tags": [
+          "prompts"
+        ],
+        "summary": "Get Or Generate Compact Prompt Endpoint",
+        "operationId": "get_or_generate_compact_prompt_endpoint_api_prompts__prompt_id__compact_get",
+        "parameters": [
+          {
+            "name": "prompt_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Prompt Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "anyOf": [
+                  {
+                    "$ref": "#/components/schemas/CompactPromptRequest"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Payload"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "prompts"
+        ],
+        "summary": "Get Or Generate Compact Prompt Endpoint",
+        "operationId": "get_or_generate_compact_prompt_endpoint_api_prompts__prompt_id__compact_post",
+        "parameters": [
+          {
+            "name": "prompt_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Prompt Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "anyOf": [
+                  {
+                    "$ref": "#/components/schemas/CompactPromptRequest"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Payload"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/prompts/{prompt_id}/improve": {
+      "post": {
+        "tags": [
+          "prompts"
+        ],
+        "summary": "Improve Prompt Endpoint",
+        "operationId": "improve_prompt_endpoint_api_prompts__prompt_id__improve_post",
+        "parameters": [
+          {
+            "name": "prompt_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Prompt Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ImprovePromptRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/prompts/{prompt_id}/save-improved": {
+      "post": {
+        "tags": [
+          "prompts"
+        ],
+        "summary": "Save Improved Prompt Endpoint",
+        "operationId": "save_improved_prompt_endpoint_api_prompts__prompt_id__save_improved_post",
+        "parameters": [
+          {
+            "name": "prompt_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Prompt Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SaveImprovedPromptRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/prompts/{prompt_id}/suggest-title": {
+      "post": {
+        "tags": [
+          "prompts"
+        ],
+        "summary": "Suggest Prompt Title",
+        "operationId": "suggest_prompt_title_api_prompts__prompt_id__suggest_title_post",
+        "parameters": [
+          {
+            "name": "prompt_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Prompt Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/prompts/{prompt_id}/generate-image": {
+      "post": {
+        "tags": [
+          "prompts"
+        ],
+        "summary": "Generate Image For Prompt",
+        "operationId": "generate_image_for_prompt_api_prompts__prompt_id__generate_image_post",
+        "parameters": [
+          {
+            "name": "prompt_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Prompt Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GenerateImageRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/prompts/{prompt_id}/generate-image-stream": {
+      "post": {
+        "tags": [
+          "prompts"
+        ],
+        "summary": "Generate Image Stream Endpoint",
+        "operationId": "generate_image_stream_endpoint_api_prompts__prompt_id__generate_image_stream_post",
+        "parameters": [
+          {
+            "name": "prompt_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Prompt Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GenerateImageRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/prompts/{prompt_id}/save-generated-image": {
+      "post": {
+        "tags": [
+          "prompts"
+        ],
+        "summary": "Save Generated Image Endpoint",
+        "operationId": "save_generated_image_endpoint_api_prompts__prompt_id__save_generated_image_post",
+        "parameters": [
+          {
+            "name": "prompt_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Prompt Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SaveGeneratedImageRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/prompts/{prompt_id}/generate-video": {
+      "post": {
+        "tags": [
+          "prompts"
+        ],
+        "summary": "Generate Video For Prompt",
+        "operationId": "generate_video_for_prompt_api_prompts__prompt_id__generate_video_post",
+        "parameters": [
+          {
+            "name": "prompt_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Prompt Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GenerateVideoRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/prompts/{prompt_id}/save-generated-video": {
+      "post": {
+        "tags": [
+          "prompts"
+        ],
+        "summary": "Save Generated Video Endpoint",
+        "operationId": "save_generated_video_endpoint_api_prompts__prompt_id__save_generated_video_post",
+        "parameters": [
+          {
+            "name": "prompt_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Prompt Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": true,
+                "default": {},
+                "title": "Payload"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/prompts/{prompt_id}/add-images": {
+      "post": {
+        "tags": [
+          "prompts"
+        ],
+        "summary": "Add Images To Prompt Endpoint",
+        "operationId": "add_images_to_prompt_endpoint_api_prompts__prompt_id__add_images_post",
+        "parameters": [
+          {
+            "name": "prompt_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Prompt Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AddImagesRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/prompts/{prompt_id}/reorder-images": {
+      "post": {
+        "tags": [
+          "prompts"
+        ],
+        "summary": "Reorder Prompt Images",
+        "operationId": "reorder_prompt_images_api_prompts__prompt_id__reorder_images_post",
+        "parameters": [
+          {
+            "name": "prompt_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Prompt Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReorderImagesRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/prompts/{prompt_id}/delete-image": {
+      "post": {
+        "tags": [
+          "prompts"
+        ],
+        "summary": "Delete Prompt Image",
+        "operationId": "delete_prompt_image_api_prompts__prompt_id__delete_image_post",
+        "parameters": [
+          {
+            "name": "prompt_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Prompt Id"
+            }
+          },
+          {
+            "name": "image_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Image Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "anyOf": [
+                  {
+                    "$ref": "#/components/schemas/DeleteImageRequest"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Payload"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/prompts/{prompt_id}/images/{image_id}": {
+      "delete": {
+        "tags": [
+          "prompts"
+        ],
+        "summary": "Delete Prompt Image",
+        "operationId": "delete_prompt_image_api_prompts__prompt_id__images__image_id__delete",
+        "parameters": [
+          {
+            "name": "prompt_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Prompt Id"
+            }
+          },
+          {
+            "name": "image_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Image Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "anyOf": [
+                  {
+                    "$ref": "#/components/schemas/DeleteImageRequest"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Payload"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/stats": {
+      "get": {
+        "tags": [
+          "prompts"
+        ],
+        "summary": "Thống kê cơ sở dữ liệu prompts",
+        "description": "Trả về số liệu thống kê tổng thể của hệ thống:\n- Tổng số prompts và phân bố theo danh mục, loại prompt.\n- Tổng số ảnh mẫu, trạng thái ảnh đã tải xuống hoặc đang chờ tải.",
+        "operationId": "get_stats_api_stats_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StatsResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/config/providers/": {
+      "get": {
+        "tags": [
+          "prompts"
+        ],
+        "summary": "Get Providers Config",
+        "operationId": "get_providers_config_api_config_providers__get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/config/providers": {
+      "get": {
+        "tags": [
+          "prompts"
+        ],
+        "summary": "Get Providers Config",
+        "operationId": "get_providers_config_api_config_providers_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/ai/ping": {
+      "get": {
+        "tags": [
+          "prompts"
+        ],
+        "summary": "Ping Ai Endpoint",
+        "description": "Kiểm tra tình trạng kết nối tới mô hình AI và đo độ trễ mạng thực tế qua ping-pong inference.",
+        "operationId": "ping_ai_endpoint_api_ai_ping_get",
+        "parameters": [
+          {
+            "name": "mode",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Chế độ kiểm tra: 'pingpong' (gọi suy luận AI thật để đo thời gian phản hồi) hoặc 'fast'",
+              "default": "pingpong",
+              "title": "Mode"
+            },
+            "description": "Chế độ kiểm tra: 'pingpong' (gọi suy luận AI thật để đo thời gian phản hồi) hoặc 'fast'"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/config": {
+      "get": {
+        "tags": [
+          "prompts"
+        ],
+        "summary": "Get Config",
+        "description": "Trả về cấu hình AI hiện tại (ẩn API key).",
+        "operationId": "get_config_api_config_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "prompts"
+        ],
+        "summary": "Save Config",
+        "description": "Config is read-only on the web; edit .env instead.",
+        "operationId": "save_config_api_config_post",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/config/open-env": {
+      "post": {
+        "tags": [
+          "prompts"
+        ],
+        "summary": "Open Env File Endpoint",
+        "description": "Mở file .env mặc định bằng Notepad của Windows.",
+        "operationId": "open_env_file_endpoint_api_config_open_env_post",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/db/backup": {
+      "post": {
+        "tags": [
+          "prompts"
+        ],
+        "summary": "Backup Db Endpoint",
+        "description": "Tạo bản sao lưu database.",
+        "operationId": "backup_db_endpoint_api_db_backup_post",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/config/open-dir": {
+      "post": {
+        "tags": [
+          "prompts"
+        ],
+        "summary": "Open Env Dir Endpoint",
+        "description": "Mở thư mục chứa file .env trong File Explorer.",
+        "operationId": "open_env_dir_endpoint_api_config_open_dir_post",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/tags/": {
+      "get": {
+        "tags": [
+          "prompts"
+        ],
+        "summary": "List Tags",
+        "operationId": "list_tags_api_tags__get",
+        "parameters": [
+          {
+            "name": "q",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Search keyword for tag autocomplete",
+              "title": "Q"
+            },
+            "description": "Search keyword for tag autocomplete"
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 100,
+              "minimum": 1,
+              "description": "Max tags to return",
+              "default": 25,
+              "title": "Limit"
+            },
+            "description": "Max tags to return"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/tags": {
+      "get": {
+        "tags": [
+          "prompts"
+        ],
+        "summary": "List Tags",
+        "operationId": "list_tags_api_tags_get",
+        "parameters": [
+          {
+            "name": "q",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Search keyword for tag autocomplete",
+              "title": "Q"
+            },
+            "description": "Search keyword for tag autocomplete"
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 100,
+              "minimum": 1,
+              "description": "Max tags to return",
+              "default": 25,
+              "title": "Limit"
+            },
+            "description": "Max tags to return"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/prompts/{prompt_id}/tags": {
+      "get": {
+        "tags": [
+          "prompts"
+        ],
+        "summary": "Get Prompt Tags",
+        "operationId": "get_prompt_tags_api_prompts__prompt_id__tags_get",
+        "parameters": [
+          {
+            "name": "prompt_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Prompt Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "prompts"
+        ],
+        "summary": "Add Prompt Tag",
+        "operationId": "add_prompt_tag_api_prompts__prompt_id__tags_post",
+        "parameters": [
+          {
+            "name": "prompt_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Prompt Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AddTagRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/prompts/{prompt_id}/tags/{tag_name}": {
+      "delete": {
+        "tags": [
+          "prompts"
+        ],
+        "summary": "Delete Prompt Tag",
+        "operationId": "delete_prompt_tag_api_prompts__prompt_id__tags__tag_name__delete",
+        "parameters": [
+          {
+            "name": "prompt_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Prompt Id"
+            }
+          },
+          {
+            "name": "tag_name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Tag Name"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/assistant/chat": {
+      "post": {
+        "tags": [
+          "prompts"
+        ],
+        "summary": "Assistant Chat Endpoint",
+        "description": "Trợ lý AI tìm kiếm và gợi ý prompt thông minh dựa trên nhu cầu của người dùng.",
+        "operationId": "assistant_chat_endpoint_api_assistant_chat_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AssistantChatRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/assistant/suggestions": {
+      "get": {
+        "tags": [
+          "prompts"
+        ],
+        "summary": "Assistant Suggestions Endpoint",
+        "description": "Trả về danh sách câu hỏi mẫu gợi ý theo danh mục để người dùng bấm nhanh.",
+        "operationId": "assistant_suggestions_endpoint_api_assistant_suggestions_get",
+        "parameters": [
+          {
+            "name": "category",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "all",
+              "title": "Category"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/sync/check": {
+      "get": {
+        "tags": [
+          "prompts"
+        ],
+        "summary": "Sync Check",
+        "description": "Kiểm tra có bản cập nhật data/code mới không.",
+        "operationId": "sync_check_api_sync_check_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/sync/pull": {
+      "post": {
+        "tags": [
+          "prompts"
+        ],
+        "summary": "Sync Pull",
+        "description": "Kéo dữ liệu prompt mới từ GitHub feed.",
+        "operationId": "sync_pull_api_sync_pull_post",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/koc/list": {
+      "get": {
+        "tags": [
+          "prompts"
+        ],
+        "summary": "Get Koc List",
+        "description": "Lấy danh sách các nhân vật KOC từ koc_management qua script list.py.",
+        "operationId": "get_koc_list_api_koc_list_get",
+        "parameters": [
+          {
+            "name": "refresh",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "description": "Quét lại toàn bộ ổ đĩa",
+              "default": false,
+              "title": "Refresh"
+            },
+            "description": "Quét lại toàn bộ ổ đĩa"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/koc/images": {
+      "get": {
+        "tags": [
+          "prompts"
+        ],
+        "summary": "Get Koc Images",
+        "description": "Lấy danh sách ảnh của một nhân vật KOC.",
+        "operationId": "get_koc_images_api_koc_images_get",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "description": "Tên KOC cần lấy ảnh",
+              "title": "Name"
+            },
+            "description": "Tên KOC cần lấy ảnh"
+          },
+          {
+            "name": "refresh",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "default": false,
+              "title": "Refresh"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/koc/image": {
+      "get": {
+        "tags": [
+          "prompts"
+        ],
+        "summary": "Serve Koc Image",
+        "description": "Trả về file ảnh KOC để hiển thị preview. Chuyển hướng trực tiếp nếu là URL S3.",
+        "operationId": "serve_koc_image_api_koc_image_get",
+        "parameters": [
+          {
+            "name": "path",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "description": "Đường dẫn tệp ảnh KOC hoặc URL S3 Presigned",
+              "title": "Path"
+            },
+            "description": "Đường dẫn tệp ảnh KOC hoặc URL S3 Presigned"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/health": {
+      "get": {
+        "tags": [
+          "system"
+        ],
+        "summary": "Health Check",
+        "operationId": "health_check_health_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "AddImagesRequest": {
+        "properties": {
+          "images": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Images",
+            "description": "Danh sách Base64 ảnh hoặc URLs đính kèm"
+          },
+          "media": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Media",
+            "description": "Chuỗi URLs phân cách bằng dấu phẩy hoặc xuống dòng"
+          }
+        },
+        "type": "object",
+        "title": "AddImagesRequest"
+      },
+      "AddSampleContentRequest": {
+        "properties": {
+          "content": {
+            "type": "string",
+            "title": "Content",
+            "description": "Nội dung văn bản mẫu đính kèm",
+            "example": "Kịch bản mẫu hoàn chỉnh..."
+          },
+          "title": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Title",
+            "description": "Tiêu đề mẫu tùy chọn",
+            "default": "",
+            "example": "Kịch bản TikTok số 1"
+          }
+        },
+        "type": "object",
+        "required": [
+          "content"
+        ],
+        "title": "AddSampleContentRequest"
+      },
+      "AddTagRequest": {
+        "properties": {
+          "tag": {
+            "type": "string",
+            "maxLength": 50,
+            "minLength": 1,
+            "title": "Tag",
+            "description": "Tên thẻ tag cần gán",
+            "example": "KOC"
+          }
+        },
+        "type": "object",
+        "required": [
+          "tag"
+        ],
+        "title": "AddTagRequest"
+      },
+      "AssistantChatRequest": {
+        "properties": {
+          "message": {
+            "type": "string",
+            "title": "Message",
+            "description": "Nội dung câu hỏi hoặc yêu cầu tìm kiếm của người dùng",
+            "example": "Tìm các prompt tạo dáng ngoại cảnh quán cafe"
+          },
+          "history": {
+            "anyOf": [
+              {
+                "items": {
+                  "additionalProperties": true,
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "History",
+            "description": "Lịch sử tin nhắn gần nhất"
+          },
+          "category": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Category",
+            "description": "Bộ lọc danh mục: 'all', 'image' hoặc 'content'",
+            "default": "all",
+            "example": "all"
+          },
+          "provider": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Provider",
+            "description": "Nhà cung cấp AI",
+            "example": "openai"
+          }
+        },
+        "type": "object",
+        "required": [
+          "message"
+        ],
+        "title": "AssistantChatRequest"
+      },
+      "Body_s3_upload_endpoint_api_s3_upload_post": {
+        "properties": {
+          "file": {
+            "anyOf": [
+              {
+                "type": "string",
+                "contentMediaType": "application/octet-stream"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "File"
+          }
+        },
+        "type": "object",
+        "title": "Body_s3_upload_endpoint_api_s3_upload_post"
+      },
+      "CompactPromptRequest": {
+        "properties": {
+          "prompt": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Prompt",
+            "description": "Tùy chọn: câu lệnh tùy biến cần rút gọn"
+          },
+          "force_refresh": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Force Refresh",
+            "description": "Bắt buộc gọi AI sinh lại kể cả khi đã có trong DB",
+            "default": false,
+            "example": false
+          }
+        },
+        "type": "object",
+        "title": "CompactPromptRequest"
+      },
+      "CreatePromptRequest": {
+        "properties": {
+          "prompt": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Prompt",
+            "description": "Nội dung câu lệnh (JSON hoặc Text thuần)",
+            "default": "",
+            "example": "A photorealistic portrait of an East Asian woman..."
+          },
+          "title": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Title",
+            "description": "Tiêu đề câu lệnh tùy chỉnh",
+            "example": "Chân dung KOC AI phong cách Studio"
+          },
+          "media": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Media",
+            "description": "URL hoặc đường dẫn ảnh/video kết quả mẫu",
+            "example": "https://example.com/sample.jpg"
+          },
+          "images": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Images",
+            "description": "Danh sách URL hoặc Base64 ảnh tải lên từ máy tính"
+          },
+          "category": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Category",
+            "description": "Loại prompt: 'image', 'video' hoặc 'content'",
+            "default": "image",
+            "example": "image"
+          },
+          "note": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Note",
+            "description": "Ghi chú / chú thích cho câu lệnh",
+            "default": "",
+            "example": "Sử dụng cho chiến dịch thời trang xuân hè"
+          },
+          "sample_content": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sample Content",
+            "description": "Nội dung kết quả mẫu dạng văn bản",
+            "example": "Tiêu đề bài viết: 5 cách phối đồ..."
+          },
+          "requires_reference": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Requires Reference",
+            "description": "Cờ yêu cầu ảnh tham chiếu khuôn mặt",
+            "example": true
+          },
+          "scenes": {
+            "anyOf": [
+              {
+                "items": {
+                  "additionalProperties": {
+                    "type": "string"
+                  },
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Scenes",
+            "description": "Danh sách phân cảnh video (dialogue, action, camera)"
+          }
+        },
+        "type": "object",
+        "title": "CreatePromptRequest"
+      },
+      "DeleteImageRequest": {
+        "properties": {
+          "image_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Image Id",
+            "description": "ID ảnh cần xóa khỏi bản ghi",
+            "example": 10
+          }
+        },
+        "type": "object",
+        "title": "DeleteImageRequest"
+      },
+      "ExtractJsonFromImageRequest": {
+        "properties": {
+          "image": {
+            "type": "string",
+            "title": "Image",
+            "description": "Base64 data URI hoặc URL của ảnh cần trích xuất VisionStruct",
+            "example": "data:image/jpeg;base64,..."
+          },
+          "provider": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Provider",
+            "description": "Nhà cung cấp AI",
+            "example": "openai"
+          }
+        },
+        "type": "object",
+        "required": [
+          "image"
+        ],
+        "title": "ExtractJsonFromImageRequest"
+      },
+      "GenerateContentRequest": {
+        "properties": {
+          "prompt": {
+            "type": "string",
+            "title": "Prompt",
+            "description": "Nội dung câu lệnh prompt",
+            "example": "Viết kịch bản video TikTok 30 giây review son môi"
+          },
+          "extra_instruction": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Extra Instruction",
+            "description": "Yêu cầu bổ sung cho AI",
+            "example": "Giọng điệu hài hước, tự nhiên"
+          },
+          "provider": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Provider",
+            "description": "Nhà cung cấp AI (mặc định cấu hình hệ thống)",
+            "example": "openai"
+          }
+        },
+        "type": "object",
+        "required": [
+          "prompt"
+        ],
+        "title": "GenerateContentRequest"
+      },
+      "GenerateImageRequest": {
+        "properties": {
+          "prompt": {
+            "type": "string",
+            "title": "Prompt",
+            "description": "Nội dung câu lệnh tạo ảnh",
+            "example": "A stylish portrait of an Asian model in neon street"
+          },
+          "model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model",
+            "description": "Tên mô hình AI tạo ảnh",
+            "example": "dall-e-3"
+          },
+          "reference_image": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reference Image",
+            "description": "Chuỗi Base64 hoặc URL ảnh tham chiếu"
+          },
+          "extra_description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Extra Description",
+            "description": "Mô tả phụ bổ sung"
+          },
+          "size": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Size",
+            "description": "Kích thước ảnh đầu ra",
+            "default": "1024x1024",
+            "example": "1024x1024"
+          },
+          "quality": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Quality",
+            "description": "Chất lượng ảnh: 'standard' hoặc 'hd'",
+            "default": "hd",
+            "example": "hd"
+          },
+          "image_detail": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Image Detail",
+            "description": "Mức độ bám sát ảnh mẫu: 'low', 'high'",
+            "default": "high",
+            "example": "high"
+          },
+          "provider": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Provider",
+            "description": "Nhà cung cấp dịch vụ AI",
+            "example": "openai"
+          }
+        },
+        "type": "object",
+        "required": [
+          "prompt"
+        ],
+        "title": "GenerateImageRequest"
+      },
+      "GenerateVideoRequest": {
+        "properties": {
+          "prompt": {
+            "type": "string",
+            "title": "Prompt",
+            "description": "Nội dung câu lệnh render video cảnh này",
+            "example": "Slow pan across the studio..."
+          },
+          "model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model",
+            "description": "Tên mô hình AI tạo video",
+            "example": "kling-v1"
+          },
+          "ratio": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ratio",
+            "description": "Tỷ lệ khung hình: '9:16' hoặc '16:9'",
+            "default": "9:16",
+            "example": "9:16"
+          },
+          "duration": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Duration",
+            "description": "Thời lượng cảnh tính bằng giây: 4, 6, 8, 10",
+            "default": 6,
+            "example": 6
+          },
+          "reference_media": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reference Media",
+            "description": "Ảnh hoặc video tham chiếu"
+          },
+          "scene_number": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Scene Number",
+            "description": "Số thứ tự cảnh",
+            "example": 1
+          },
+          "provider": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Provider",
+            "description": "Nhà cung cấp video AI"
+          }
+        },
+        "type": "object",
+        "required": [
+          "prompt"
+        ],
+        "title": "GenerateVideoRequest"
+      },
+      "HTTPValidationError": {
+        "properties": {
+          "detail": {
+            "items": {
+              "$ref": "#/components/schemas/ValidationError"
+            },
+            "type": "array",
+            "title": "Detail"
+          }
+        },
+        "type": "object",
+        "title": "HTTPValidationError"
+      },
+      "ImprovePromptRequest": {
+        "properties": {
+          "instruction": {
+            "type": "string",
+            "title": "Instruction",
+            "description": "Yêu cầu cải tiến hoặc sửa đổi từ người dùng",
+            "example": "Thêm chi tiết ánh sáng cinematic và góc máy góc thấp"
+          },
+          "provider": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Provider",
+            "description": "Nhà cung cấp AI",
+            "example": "openai"
+          },
+          "auto_save": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Auto Save",
+            "description": "Tự động lưu đè vào bản ghi sau khi sinh thành công",
+            "default": false,
+            "example": false
+          }
+        },
+        "type": "object",
+        "required": [
+          "instruction"
+        ],
+        "title": "ImprovePromptRequest"
+      },
+      "PromptListResponse": {
+        "properties": {
+          "count": {
+            "type": "integer",
+            "title": "Count",
+            "description": "Số lượng kết quả trả về",
+            "example": 20
+          },
+          "tag": {
+            "type": "string",
+            "title": "Tag",
+            "description": "Bộ lọc tag đang áp dụng",
+            "default": "all",
+            "example": "all"
+          },
+          "category": {
+            "type": "string",
+            "title": "Category",
+            "description": "Bộ lọc danh mục đang áp dụng",
+            "default": "image",
+            "example": "image"
+          },
+          "query": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Query",
+            "description": "Từ khóa tìm kiếm đang áp dụng",
+            "example": "studio"
+          },
+          "items": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "type": "array",
+            "title": "Items",
+            "description": "Danh sách các bản ghi prompt"
+          }
+        },
+        "type": "object",
+        "required": [
+          "count",
+          "items"
+        ],
+        "title": "PromptListResponse"
+      },
+      "ReorderImagesRequest": {
+        "properties": {
+          "image_ids": {
+            "items": {
+              "type": "integer"
+            },
+            "type": "array",
+            "title": "Image Ids",
+            "description": "Danh sách ID ảnh theo thứ tự hiển thị mới",
+            "example": [
+              2,
+              1,
+              3
+            ]
+          }
+        },
+        "type": "object",
+        "required": [
+          "image_ids"
+        ],
+        "title": "ReorderImagesRequest"
+      },
+      "ReorderSampleContentsRequest": {
+        "properties": {
+          "ordered_ids": {
+            "items": {
+              "type": "integer"
+            },
+            "type": "array",
+            "title": "Ordered Ids",
+            "description": "Danh sách ID mẫu theo thứ tự hiển thị mới",
+            "example": [
+              3,
+              1,
+              2
+            ]
+          }
+        },
+        "type": "object",
+        "required": [
+          "ordered_ids"
+        ],
+        "title": "ReorderSampleContentsRequest"
+      },
+      "SaveGeneratedImageRequest": {
+        "properties": {
+          "image_data": {
+            "type": "string",
+            "title": "Image Data",
+            "description": "URL hoặc Base64 ảnh đã tạo",
+            "example": "data:image/jpeg;base64,..."
+          }
+        },
+        "type": "object",
+        "required": [
+          "image_data"
+        ],
+        "title": "SaveGeneratedImageRequest"
+      },
+      "SaveImprovedPromptRequest": {
+        "properties": {
+          "mode": {
+            "type": "string",
+            "title": "Mode",
+            "description": "Chế độ lưu: 'overwrite' (ghi đè) hoặc 'new_version' (tạo bản ghi mới)",
+            "default": "overwrite",
+            "example": "overwrite"
+          },
+          "title": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Title",
+            "description": "Tiêu đề câu lệnh mới",
+            "example": "KOC Studio - Phiên bản cải tiến"
+          },
+          "prompt_code": {
+            "type": "string",
+            "title": "Prompt Code",
+            "description": "Nội dung câu lệnh prompt mới",
+            "example": "{...}"
+          },
+          "raw_content": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Raw Content",
+            "description": "Nội dung văn bản gốc"
+          },
+          "prompt_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Prompt Type",
+            "description": "Loại câu lệnh: 'json' hoặc 'text'",
+            "default": "json",
+            "example": "json"
+          },
+          "parsed_json": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Parsed Json",
+            "description": "Cấu trúc JSON đã phân tích"
+          },
+          "fields": {
+            "anyOf": [
+              {
+                "items": {
+                  "additionalProperties": true,
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Fields",
+            "description": "Danh sách trường tùy biến mới"
+          }
+        },
+        "type": "object",
+        "required": [
+          "prompt_code"
+        ],
+        "title": "SaveImprovedPromptRequest"
+      },
+      "SaveKocGalleryRequest": {
+        "properties": {
+          "image": {
+            "type": "string",
+            "title": "Image",
+            "description": "Dữ liệu ảnh base64 hoặc URL ảnh",
+            "example": "data:image/png;base64,..."
+          },
+          "koc_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Koc Name",
+            "description": "Tên nhân vật KOC",
+            "default": "",
+            "example": "Thu Trang"
+          },
+          "ref_path": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ref Path",
+            "description": "Đường dẫn tệp tham chiếu để lưu cùng thư mục",
+            "example": "Thu Trang/ref.png"
+          },
+          "prompt_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Prompt Id",
+            "description": "ID bản ghi prompt liên quan",
+            "example": "prompt_1"
+          }
+        },
+        "type": "object",
+        "required": [
+          "image"
+        ],
+        "title": "SaveKocGalleryRequest"
+      },
+      "SetPrimaryFieldRequest": {
+        "properties": {
+          "is_primary": {
+            "type": "boolean",
+            "title": "Is Primary",
+            "description": "Cờ đánh dấu thuộc tính chính (hiển thị trên giao diện thu gọn)",
+            "example": true
+          }
+        },
+        "type": "object",
+        "required": [
+          "is_primary"
+        ],
+        "title": "SetPrimaryFieldRequest"
+      },
+      "StatsResponse": {
+        "properties": {
+          "total_prompts": {
+            "type": "integer",
+            "title": "Total Prompts",
+            "description": "Tổng số prompt trong cơ sở dữ liệu",
+            "example": 442
+          },
+          "total_images": {
+            "type": "integer",
+            "title": "Total Images",
+            "description": "Tổng số ảnh đính kèm",
+            "example": 381
+          },
+          "downloaded_images": {
+            "type": "integer",
+            "title": "Downloaded Images",
+            "description": "Số ảnh đã lưu trữ cục bộ thành công",
+            "example": 381
+          },
+          "pending_images": {
+            "type": "integer",
+            "title": "Pending Images",
+            "description": "Số ảnh đang chờ tải xuống",
+            "example": 0
+          },
+          "failed_images": {
+            "type": "integer",
+            "title": "Failed Images",
+            "description": "Số ảnh tải xuống thất bại",
+            "example": 0
+          },
+          "by_type": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "type": "object",
+            "title": "By Type",
+            "description": "Thống kê theo loại prompt (json, text, ...)"
+          },
+          "by_category": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "type": "object",
+            "title": "By Category",
+            "description": "Thống kê theo danh mục (image, video, content)"
+          }
+        },
+        "type": "object",
+        "required": [
+          "total_prompts",
+          "total_images",
+          "downloaded_images",
+          "pending_images",
+          "failed_images",
+          "by_type",
+          "by_category"
+        ],
+        "title": "StatsResponse"
+      },
+      "UpdatePromptRequest": {
+        "properties": {
+          "title": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Title",
+            "description": "Tiêu đề mới của câu lệnh",
+            "example": "Tiêu đề cập nhật mới"
+          },
+          "prompt_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Prompt Code",
+            "description": "Nội dung mã prompt tùy biến mới"
+          },
+          "note": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Note",
+            "description": "Ghi chú cập nhật",
+            "example": "Ghi chú mới cho câu lệnh"
+          },
+          "category": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Category",
+            "description": "Danh mục mới: 'image', 'video', 'content'",
+            "example": "video"
+          },
+          "requires_reference": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Requires Reference",
+            "description": "Cờ bật/tắt yêu cầu ảnh tham chiếu",
+            "example": false
+          },
+          "fields": {
+            "anyOf": [
+              {
+                "items": {
+                  "additionalProperties": true,
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Fields",
+            "description": "Danh sách các thuộc tính tùy biến đã chỉnh sửa"
+          }
+        },
+        "type": "object",
+        "title": "UpdatePromptRequest"
+      },
+      "UploadReferenceImageRequest": {
+        "properties": {
+          "image": {
+            "type": "string",
+            "title": "Image",
+            "description": "Ảnh tham chiếu dạng base64 data URI hoặc đường dẫn tệp",
+            "example": "data:image/png;base64,..."
+          },
+          "is_koc": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Is Koc",
+            "description": "Đánh dấu ảnh được chọn từ danh mục KOC",
+            "default": false,
+            "example": false
+          }
+        },
+        "type": "object",
+        "required": [
+          "image"
+        ],
+        "title": "UploadReferenceImageRequest"
+      },
+      "ValidationError": {
+        "properties": {
+          "loc": {
+            "items": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "integer"
+                }
+              ]
+            },
+            "type": "array",
+            "title": "Location"
+          },
+          "msg": {
+            "type": "string",
+            "title": "Message"
+          },
+          "type": {
+            "type": "string",
+            "title": "Error Type"
+          },
+          "input": {
+            "title": "Input"
+          },
+          "ctx": {
+            "type": "object",
+            "title": "Context"
+          }
+        },
+        "type": "object",
+        "required": [
+          "loc",
+          "msg",
+          "type"
+        ],
+        "title": "ValidationError"
+      }
+    }
+  },
+  "tags": [
+    {
+      "name": "prompts",
+      "description": "Quản lý cơ sở dữ liệu câu lệnh prompt: tra cứu, thêm mới, cập nhật, xóa, gắn tags, rút gọn và phân tích."
+    },
+    {
+      "name": "ai",
+      "description": "Các tác vụ tích hợp AI: sinh nội dung, tạo ảnh, render video, trích xuất JSON VisionStruct và trợ lý tìm kiếm."
+    },
+    {
+      "name": "koc",
+      "description": "Quản lý thư viện hình ảnh và nhân vật KOC AI chuyên nghiệp."
+    },
+    {
+      "name": "s3",
+      "description": "Dịch vụ đồng bộ lưu trữ đám mây S3 / Cloud Storage cho tài sản số."
+    },
+    {
+      "name": "system",
+      "description": "Cấu hình hệ thống, kiểm tra sức khỏe và thao tác tệp."
+    }
+  ]
+}

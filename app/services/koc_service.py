@@ -203,17 +203,9 @@ def get_images_for_koc(koc_name: str, refresh: bool = False) -> List[Dict[str, A
             presigned = path_str
 
         # Web URL for original full-resolution image (prioritize presigned S3 URL)
-        from app.services.s3_storage import get_presigned_url
-        raw_web = img.get("url") or presigned
-        if not raw_web and path_str:
-            display_web_url = f"/api/koc/image?path={quote(path_str)}"
-            s3_web_url = display_web_url
-        elif raw_web and raw_web.startswith(("http://", "https://")):
-            s3_web_url = get_presigned_url(raw_web)
-            display_web_url = f"/api/media/proxy?url={quote(raw_web)}"
-        else:
-            display_web_url = raw_web or ""
-            s3_web_url = display_web_url
+        web_url = img.get("url") or presigned
+        if not web_url and path_str:
+            web_url = f"/api/koc/image?path={quote(path_str)}"
 
         # Thumbnail URL: prioritize thumb/thumb_url from koc_management (30KB-80KB vs 2-5MB)
         thumb_str = img.get("thumb") or img.get("thumb_url") or img.get("thumb_path") or ""
@@ -221,35 +213,27 @@ def get_images_for_koc(koc_name: str, refresh: bool = False) -> List[Dict[str, A
         if not thumb_presigned and thumb_str.startswith(("http://", "https://")):
             thumb_presigned = thumb_str
 
-        raw_thumb = img.get("thumb_url") or thumb_presigned or thumb_str
-        if not raw_thumb:
+        thumb_web_url = img.get("thumb_url") or thumb_presigned or thumb_str
+        if not thumb_web_url:
             thumb_local = img.get("thumb_local_path") or ""
             if thumb_local:
-                display_thumb_url = f"/api/koc/image?path={quote(thumb_local)}"
-                s3_thumb_url = display_thumb_url
+                thumb_web_url = f"/api/koc/image?path={quote(thumb_local)}"
             else:
-                display_thumb_url = display_web_url
-                s3_thumb_url = s3_web_url
-        elif raw_thumb.startswith(("http://", "https://")):
-            s3_thumb_url = get_presigned_url(raw_thumb)
-            display_thumb_url = f"/api/media/proxy?url={quote(raw_thumb)}"
-        else:
-            display_thumb_url = raw_thumb
-            s3_thumb_url = raw_thumb
+                thumb_web_url = web_url
 
         results.append({
             "name": img.get("name") or Path(path_str).name,
             "path": path_str,
             "image": img.get("image") or path_str,
-            "url": display_web_url,
-            "presigned_url": s3_web_url,
-            "s3_url": s3_web_url,
+            "url": web_url,
+            "presigned_url": presigned or web_url,
+            "s3_url": presigned or web_url,
             "local_path": img.get("local_path") or (path_str if not path_str.startswith(("http://", "https://")) else ""),
             "s3_path": img.get("s3_path") or "",
             "s3_key": img.get("s3_key") or "",
             "rel_path": img.get("rel_path", ""),
-            "thumb": display_thumb_url,
-            "thumb_url": display_thumb_url,
+            "thumb": thumb_web_url,
+            "thumb_url": thumb_web_url,
             "thumb_path": img.get("thumb_path") or thumb_web_url,
             "thumb_rel_path": img.get("thumb_rel_path", ""),
             "thumb_local_path": img.get("thumb_local_path", ""),

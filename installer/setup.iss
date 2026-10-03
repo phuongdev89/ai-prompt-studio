@@ -34,7 +34,7 @@ PrivilegesRequired=lowest
 
 OutputDir=..\dist
 OutputBaseFilename=AI_Prompt_Studio_Setup_v{#MyAppVersion}
-SetupIconFile=..\assets\icon.ico
+SetupIconFile=..\public\favicon.ico
 UninstallDisplayIcon={app}\{#MyAppExeName}
 
 Compression=lzma2/ultra64
@@ -55,6 +55,11 @@ Source: "..\dist\AIPromptStudio\_internal\*"; DestDir: "{app}\_internal"; Flags:
 Source: "..\.version"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\.env.example"; DestDir: "{app}"; DestName: ".env"; Flags: onlyifdoesntexist uninsneveruninstall; Permissions: users-modify
 Source: "..\.env.example"; DestDir: "{app}"; DestName: ".env.example"; Flags: ignoreversion; Permissions: users-modify
+Source: "..\public\*"; DestDir: "{app}\public"; Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "..\bin\*"; DestDir: "{app}\bin"; Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "..\scripts\register_windows.ps1"; DestDir: "{app}\scripts"; Flags: ignoreversion
+Source: "..\scripts\unregister_windows.ps1"; DestDir: "{app}\scripts"; Flags: ignoreversion
+Source: "..\cli.py"; DestDir: "{app}"; Flags: ignoreversion
 
 ; Create empty data dirs with permissions
 Source: "..\.version"; DestDir: "{app}\data"; Flags: uninsneveruninstall; Permissions: users-modify
@@ -67,7 +72,11 @@ Name: "{group}\{cm:UninstallProgram,{#MyAppName}}"; Filename: "{uninstallexe}"
 Name: "{autodesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; Tasks: desktopicon
 
 [Run]
+Filename: "powershell.exe"; Parameters: "-ExecutionPolicy Bypass -NoProfile -File ""{app}\scripts\register_windows.ps1"" -InstallDir ""{app}"""; StatusMsg: "Đang đăng ký công cụ CLI vào Windows..."; Flags: runhidden
 Filename: "{app}\{#MyAppExeName}"; Description: "{cm:LaunchProgram,{#StringChange(MyAppName, '&', '&&')}}"; Flags: nowait postinstall skipifsilent
+
+[UninstallRun]
+Filename: "powershell.exe"; Parameters: "-ExecutionPolicy Bypass -NoProfile -File ""{app}\scripts\unregister_windows.ps1"" -InstallDir ""{app}"""; Flags: runhidden
 
 [InstallDelete]
 ; Clean up old internal dir before installing new one
@@ -76,6 +85,10 @@ Type: filesandordirs; Name: "{app}\_internal"
 [UninstallDelete]
 Type: files; Name: "{app}\.version"
 Type: files; Name: "{app}\{#MyAppExeName}"
+Type: files; Name: "{app}\cli.py"
+Type: filesandordirs; Name: "{app}\bin"
+Type: filesandordirs; Name: "{app}\scripts"
+Type: filesandordirs; Name: "{app}\public"
 Type: filesandordirs; Name: "{app}\_internal"
 ; Ask to delete data folder in Code section
 

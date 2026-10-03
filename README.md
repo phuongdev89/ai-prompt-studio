@@ -1,128 +1,187 @@
-# 🪄 AI Prompt Studio - Quản lý & Tùy biến Prompt AI
+# 🪄 AI Prompt Studio (`ai_prompts_database`)
 
-Dự án Python hoàn chỉnh phục vụ việc quản lý, tìm kiếm, tùy biến tham số theo thời gian thực và quản trị bộ sưu tập hàng trăm Prompt AI (Storyboard, Chân dung, Video KOC,...) với Backend **FastAPI** và Cơ sở dữ liệu **SQLite**.
+> Hệ sinh thái quản lý, tùy biến và sinh câu lệnh Prompt AI đa năng (Storyboard, Chân dung KOC, Video quảng cáo, Content) với **FastAPI**, **SQLite**, giao diện **Web SPA** và giao diện dòng lệnh **Headless-First CLI (`aff-prompt`)**.
+
+---
+
+## 🌟 Tính năng nổi bật
+
+1. **Giao diện Dòng lệnh Độc lập (Headless-First CLI - `aff-prompt`):**
+   - Vận hành 100% độc lập qua SQLite, **không yêu cầu** bật máy chủ Web.
+   - Hỗ trợ cờ `--json` xuất dữ liệu sạch ra `stdout`, nhật ký và thông báo lỗi ghi sang `stderr`.
+   - Cấu hình chuẩn UTF-8 chống lỗi hiển thị trên Windows PowerShell và CMD. Mã thoát chuẩn: `0` (thành công), `1` (thất bại).
+2. **Giao diện Web SPA Trực quan:**
+   - Tìm kiếm, lọc theo thẻ tag, tinh chỉnh tham số prompt trực tiếp theo thời gian thực.
+   - Thư viện nhân vật KOC AI, xem trước và lưu trữ ảnh mẫu cục bộ / S3 Backblaze.
+3. **Tài liệu API Tự động (OpenAPI Reference):**
+   - Đầy đủ bộ tài liệu trực quan tại `/docs/api`: Swagger UI (`/docs/api/swagger`), ReDoc (`/docs/api/redoc`) và OpenAPI JSON (`/docs/api/openapi.json`).
+   - Bộ tệp tĩnh xuất sẵn tại thư mục `docs/api/` (`index.html`, `swagger.html`, `redoc.html`, `openapi.json`).
+   - Mô hình dữ liệu Pydantic v2 chi tiết kèm mô tả trường và ví dụ mẫu.
+4. **Tích hợp Windows Một chạm:**
+   - Shim launcher `bin/aff-prompt.cmd` tự động tìm Python `.venv` nội bộ.
+   - Script PowerShell đăng ký công cụ vào User `PATH` không cần quyền Administrator.
 
 ---
 
 ## 📂 Cấu trúc thư mục dự án
 
 ```text
-phan_tich_1/
+ai_prompts_database/
 │
-├── app/                           # Ứng dụng Backend Web & Giao diện
+├── app/                           # Mã nguồn Backend
 │   ├── api/
-│   │   └── routes.py              # REST API (/api/prompts, /api/stats, /api/export)
+│   │   ├── routes.py              # REST API Router endpoints
+│   │   └── schemas.py             # Pydantic v2 Models & OpenAPI Schemas
 │   ├── db/
 │   │   ├── database.py            # Kết nối & Khởi tạo SQLite
-│   │   └── repository.py          # Xử lý truy vấn dữ liệu Prompt & Images
-│   ├── static/                    # Frontend static assets
-│   │   └── js/
-│   │       └── app.js             # Logic điều khiển UI, tương tác REST API
-│   ├── templates/
-│   │   └── index.html             # Giao diện người dùng (Dark Theme, Tailwind CSS)
-│   ├── config.py                  # Cấu hình hệ thống & đường dẫn
-│   └── main.py                    # Khởi tạo FastAPI application
+│   │   └── repository.py          # Xử lý truy vấn dữ liệu Prompt, Images & Tags
+│   ├── services/                  # Dịch vụ nghiệp vụ (AI, KOC, S3, Parser)
+│   ├── config.py                  # Cấu hình tập trung & biến môi trường
+│   └── main.py                    # Khởi tạo ứng dụng FastAPI & OpenAPI Metadata
 │
-├── data/                          # Dữ liệu & Cơ sở dữ liệu
+├── public/                        # Tài nguyên Web tĩnh & Giao diện SPA
+│   ├── index.html                 # Giao diện HTML SPA
+│   ├── js/                        # JavaScript frontend (app.js)
+│   ├── css/                       # CSS stylesheet
+│   ├── favicon.ico                # App icon & Web favicon
+│   └── favicon.png                # PNG icon
+│
+├── bin/                           # Shim launchers toàn hệ thống
+│   ├── aff-prompt.cmd             # Windows CMD/PowerShell launcher
+│   └── aff-prompt                 # Shell / Git Bash launcher
+│
+├── data/                          # Lưu trữ dữ liệu
 │   ├── prompts.db                 # SQLite Database chính
-│   ├── cleaned_prompts.json       # Tệp JSON đã làm sạch (backup)
-│   └── images/                    # Thư mục lưu trữ ảnh đã tải về máy
+│   └── images/                    # Thư mục lưu trữ hình ảnh tải về
 │
-├── tests/                         # Các công cụ script và test chạy độc lập
-│   ├── download_images.py         # Script tải toàn bộ ảnh (đa luồng, có resume)
-│   ├── migrate_json_to_sqlite.py  # Script import JSON sang SQLite
-│   ├── process_prompts.py         # Script làm sạch và bóc tách dữ liệu
-│   └── inspect_dataset.py         # Script kiểm tra dataset
+├── docs/                          # Tài liệu kỹ thuật
+│   ├── api_reference.md           # Đặc tả chi tiết danh mục REST API
+│   └── api/                       # Bộ tài liệu API tĩnh (Swagger, ReDoc, OpenAPI JSON)
+│       ├── index.html             # API Docs Hub
+│       ├── swagger.html           # Standalone Swagger UI
+│       ├── redoc.html             # Standalone ReDoc
+│       └── openapi.json           # Tệp đặc tả OpenAPI 3.x schema
 │
-├── run.py                         # 🚀 File khởi động Web Server: python run.py
-├── requirements.txt               # Danh sách thư viện cần thiết
+├── scripts/                       # Scripts tiện ích & Quản trị Windows
+│   ├── register_windows.ps1       # Tự động thêm bin vào User PATH & tạo Shortcut
+│   └── unregister_windows.ps1     # Gỡ bỏ bin khỏi User PATH và xóa Shortcut
+│
+├── tests/                         # Bộ kiểm thử tự động (pytest)
+│   ├── test_s3_features.py        # Kiểm thử tích hợp S3 và KOC service
+│   ├── test_cli_headless.py       # Kiểm thử CLI Headless
+│   └── test_api_docs.py           # Kiểm thử OpenAPI & Docs endpoint
+│
+├── cli.py                         # Điểm vào chính của dòng lệnh CLI Headless
+├── run.py                         # Script khởi động Web Server Uvicorn
+├── requirements.txt               # Thư viện phụ thuộc
+├── CHANGELOG.md                   # Nhật ký thay đổi phiên bản
 └── README.md                      # Tài liệu hướng dẫn sử dụng
 ```
 
 ---
 
-## 🚀 1. Hướng dẫn cài đặt & Khởi động Web Server
+## 🚀 Cài đặt & Đăng ký Windows
 
-### Bước 1: Cài đặt thư viện (nếu chưa cài)
+### Bước 1: Cài đặt thư viện Python
+Khuyến nghị sử dụng Python 3.10 trở lên:
 ```bash
 pip install -r requirements.txt
 ```
 
-### Bước 2: Khởi động Web Server
-Chỉ cần chạy lệnh:
+### Bước 2: Đăng ký lệnh `aff-prompt` toàn hệ thống (Windows)
+Chạy script PowerShell (không cần quyền Admin):
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\register_windows.ps1
+```
+*Script sẽ tự động thêm thư mục `bin/` vào User `PATH` và tạo Shortcut trên Desktop.*
+
+Để gỡ cài đặt khỏi PATH:
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\unregister_windows.ps1
+```
+
+---
+
+## 💻 Hướng dẫn sử dụng Dòng lệnh CLI (`aff-prompt`)
+
+Sau khi đăng ký (hoặc chạy trực tiếp `python cli.py`), bạn có thể gọi `aff-prompt` ở bất kỳ thư mục nào:
+
+### 1. Bảng tra cứu lệnh chính
+
+| Lệnh | Ý nghĩa | Ví dụ |
+| :--- | :--- | :--- |
+| `aff-prompt list` | Liệt kê danh sách prompts | `aff-prompt list --limit 10 --category image` |
+| `aff-prompt get` | Xem chi tiết 1 prompt | `aff-prompt get prompt_1 --json` |
+| `aff-prompt add` | Thêm prompt mới | `aff-prompt add --content "Prompt..." --title "Tiêu đề"` |
+| `aff-prompt update` | Cập nhật thông tin prompt | `aff-prompt update prompt_1 --title "Tiêu đề mới"` |
+| `aff-prompt delete` | Xóa prompt khỏi database | `aff-prompt delete prompt_99 --force` |
+| `aff-prompt tags` | Quản lý danh mục thẻ tags | `aff-prompt tags list --json` |
+| `aff-prompt stats` | Xem thống kê tổng quan DB | `aff-prompt stats --json` |
+| `aff-prompt export` | Xuất prompts ra file JSON | `aff-prompt export -o backup.json --category image` |
+| `aff-prompt serve` | Khởi chạy máy chủ Web UI | `aff-prompt serve --port 8000` |
+
+### 2. Ví dụ sử dụng CLI Headless & Pipe JSON
+
+**Tra cứu và xuất JSON sạch:**
 ```bash
+# Lấy thống kê dạng JSON
+aff-prompt stats --json
+
+# Lấy 5 prompt chân dung dạng JSON
+aff-prompt list --tag portrait --limit 5 --json
+
+# Lấy mã prompt thuần để dán vào công cụ khác
+aff-prompt get prompt_1 --raw
+```
+
+**Thêm prompt từ tệp hoặc qua pipe:**
+```bash
+# Thêm từ tham số trực tiếp
+aff-prompt add --content "A cinematic photo of Vietnamese woman in studio..." --title "KOC Studio #1" --category image
+
+# Thêm từ tệp văn bản
+aff-prompt add -f my_prompt.txt --title "Prompt từ tệp" --category video
+```
+
+---
+
+## 🌐 Giao diện Web & Tài liệu API
+
+### Khởi động Web Server
+```bash
+# Bằng lệnh toàn hệ thống
+aff-prompt serve
+
+# Hoặc bằng Python trực tiếp
 python run.py
 ```
-> Trình duyệt sẽ **tự động mở** tại địa chỉ: `http://127.0.0.1:8000`.
+Máy chủ sẽ mở tại `http://127.0.0.1:8000` (hoặc cổng ngẫu nhiên nếu bị chiếm dụng).
 
-**Tùy chọn nâng cao khi chạy server:**
+### Tài liệu API Trực quan
+Khi Web Server đang chạy, truy cập:
+- **API Documentation Hub:** `http://127.0.0.1:8000/docs/api`
+- **Swagger UI:** `http://127.0.0.1:8000/docs/api/swagger` (hoặc `/docs`)
+- **ReDoc:** `http://127.0.0.1:8000/docs/api/redoc` (hoặc `/redoc`)
+- **OpenAPI Schema:** `http://127.0.0.1:8000/docs/api/openapi.json` (hoặc `/openapi.json`)
+
+Xem đặc tả chi tiết danh mục API tại: [docs/api_reference.md](docs/api_reference.md).
+Xem bộ tài liệu API tĩnh tại: [docs/api/index.html](docs/api/index.html).
+
+---
+
+## 🧪 Kiểm thử tự động (Test Suite)
+
+Chạy toàn bộ bài test:
 ```bash
-# Đổi cổng (port)
-python run.py --port 8080
-
-# Chế độ phát triển (Auto reload khi sửa code)
-python run.py --reload
-
-# Không tự động mở trình duyệt
-python run.py --no-browser
+pytest
+```
+Chạy riêng các bài test chức năng CLI và API Docs:
+```bash
+pytest tests/test_cli_headless.py tests/test_api_docs.py
 ```
 
 ---
 
-## 🖼️ 2. Hướng dẫn chạy script tải toàn bộ ảnh (Chạy thủ công)
-
-Bạn có thể chạy script `download_images.py` bất cứ khi nào bạn muốn để tải toàn bộ ảnh từ URL về thư mục `data/images/`:
-
-```bash
-python tests/download_images.py
-```
-
-### Các tính năng của Script tải ảnh:
-- **Tải đa luồng (Multi-threading)**: Mặc định chạy 10 luồng song song giúp tải nhanh chóng.
-- **Tính năng Resume**: Tự động bỏ qua các ảnh đã có trên máy và các ảnh đã tải trước đó.
-- **Thanh tiến trình trực quan (`tqdm`)**: Hiển thị tốc độ tải, số lượng ảnh hoàn thành.
-- **Cập nhật SQLite**: Tự động gán đường dẫn ảnh local vào database. Giao diện Web sẽ tự động ưu tiên load ảnh từ máy thay vì load qua mạng.
-
-**Tùy chọn khi tải ảnh:**
-```bash
-# Tăng số luồng tải đồng thời lên 15 luồng:
-python tests/download_images.py --workers 15
-
-# Tải thử nghiệm 10 ảnh:
-python tests/download_images.py --limit 10
-
-# Tăng thời gian chờ (timeout) cho mạng chậm:
-python tests/download_images.py --timeout 30
-
-# Bắt buộc tải lại cả những ảnh đã có:
-python tests/download_images.py --force
-```
-
----
-
-## 🛠️ 3. Các Script quản lý dữ liệu khác (Khi cần)
-
-- **Import/Khởi tạo lại cơ sở dữ liệu SQLite từ JSON**:
-  ```bash
-  python tests/migrate_json_to_sqlite.py
-  ```
-- **Làm sạch dữ liệu**:
-  ```bash
-  python tests/process_prompts.py
-  ```
-- **Kiểm tra phân loại dataset**:
-  ```bash
-  python tests/inspect_dataset.py
-  ```
-
----
-
-## ✨ Tính năng nổi bật trên Web App
-
-1. **Giao diện hiện đại Dark Theme**: Tối ưu cho mắt, responsive trên mọi kích thước màn hình.
-2. **Bộ lọc & Tìm kiếm tức thì**: Lọc theo các chủ đề chuyên sâu: *Storyboard (12 ô)*, *Chân dung / Góc xinh*, *Video KOC*, *Có ảnh mẫu*,...
-3. **Form bóc tách tham số 2 chiều (Dynamic Form)**: Tùy biến trực tiếp các thông số (ánh sáng, phong cách, ống kính, nhân vật, trang phục,...) -> Câu lệnh prompt tự động cập nhật ngay lập tức.
-4. **Lưu thay đổi vào SQLite**: Nút *Lưu thay đổi* giúp lưu vĩnh viễn các tùy biến của bạn vào database.
-5. **Image Slider & Lightbox Phóng to**: Xem gallery ảnh mẫu độ phân giải cao, hỗ trợ xem full màn hình.
-6. **Thêm mới câu lệnh thông minh**: Hỗ trợ thêm Prompt mới chỉ với 2 trường (Link ảnh/video kết quả mẫu & Nội dung Prompt). Hệ thống tự động nhận diện JSON để bóc tách thành Dynamic Form hoặc lưu dạng Text thông thường.
-7. **Sao chép 1 chạm**: Sao chép câu lệnh chỉ với 1 click vào bộ nhớ tạm.
+## 📄 Bản quyền & Tác giả
+- Tác giả: Phương Dev
+- Dự án: AI Prompt Studio (`ai_prompts_database`)
