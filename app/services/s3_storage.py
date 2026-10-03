@@ -6,13 +6,224 @@ import mimetypes
 import os
 import shutil
 import sqlite3
+import ssl
 import tempfile
+import time
 import urllib.request
 import uuid
 from pathlib import Path
 from typing import Any, Dict, Optional, Tuple
+from urllib.parse import urlparse, unquote, parse_qs
 
-from app.config import DATA_DIR, IMAGES_DIR, get_ai_config
+from app.config import DATA_DIR, IMAGES_DIR, THUMBNAILS_DIR, get_ai_config
+
+# In-memory cache for presigned URLs: key -> (presigned_url, expire_timestamp)
+_PRESIGNED_CACHE: Dict[str, Tuple[str, float]] = {}
+DEFAULT_PRESIGNED_EXPIRES = 86400  # 24 hours
+
+
+def get_or_download_thumbnail(url_or_key: str, cfg: Optional[dict] = None) -> Optional[Path]:
+    """Lấy đường dẫn ảnh/video thumbnail từ thư mục cục bộ (DATA_DIR/thumbnails).
+    Nếu chưa có, tải từ S3 (hoặc URL), lưu vào thư mục và trả về Path.
+    Từ lần sau, trực tiếp phục vụ tệp từ đĩa cục bộ.
+    """
+    if not url_or_key or not isinstance(url_or_key, str):
+        return None
+
+    raw_str = url_or_key.strip()
+    if not raw_str or raw_str.startswith("data:"):
+        return None
+
+    # Nếu truyền vào dạng /api/media/proxy?url=...
+    if "/api/media/proxy" in raw_str:
+        try:
+            parsed = urlparse(raw_str)
+            qs = parse_qs(parsed.query)
+            target = qs.get("url", [""])[0]
+            if target:
+                raw_str = target.strip()
+        except Exception:
+            pass
+
+    THUMBNAILS_DIR.mkdir(parents=True, exist_ok=True)
+    cfg = cfg or get_ai_config()
+
+    # Xác định tên file cache ổn định
+    parsed = urlparse(raw_str)
+    clean_path = unquote(parsed.path.lstrip("/"))
+    basename = Path(clean_path).name
+
+    ext = Path(basename).suffix.lower() if Path(basename).suffix else ".jpg"
+    if ext not in {".jpg", ".jpeg", ".png", ".webp", ".gif", ".mp4", ".mov", ".webm"}:
+        ext = ".jpg"
+
+    # Nếu basename đã là chuỗi hash md5 hợp lệ (32 ký tự hex)
+    stem = Path(basename).stem
+    if len(stem) >= 32 and all(c in "0123456789abcdefABCDEF_-" for c in stem):
+        cache_filename = f"{stem}{ext}"
+    else:
+        url_hash = hashlib.md5(raw_str.split("?")[0].encode("utf-8")).hexdigest()
+        cache_filename = f"{url_hash}{ext}"
+
+    cache_path = THUMBNAILS_DIR / cache_filename
+
+    # 1. Nếu đã có trong thư mục thumbnails -> dùng ngay lập tức
+    if cache_path.exists() and cache_path.stat().st_size > 0:
+        return cache_path
+
+    # 2. Kiểm tra nếu có sẵn trong IMAGES_DIR
+    if (IMAGES_DIR / basename).exists() and (IMAGES_DIR / basename).stat().st_size > 0:
+        try:
+            shutil.copy2(IMAGES_DIR / basename, cache_path)
+            return cache_path
+        except Exception:
+            return IMAGES_DIR / basename
+
+    # 3. Tải từ S3 hoặc URL ngoài
+    bucket = cfg.get("s3_bucket", "")
+    key = ""
+    if raw_str.startswith(("http://", "https://")):
+        if is_s3_url(raw_str, cfg):
+            if bucket and clean_path.startswith(f"{bucket}/"):
+                key = clean_path[len(bucket) + 1:]
+            else:
+                key = clean_path
+    else:
+        cleaned = raw_str.lstrip("/")
+        if cleaned.startswith("images/"):
+            cleaned = cleaned[len("images/"):]
+        prefix = (cfg.get("s3_key_prefix") or "ai_prompts_database").strip("/")
+        key = f"{prefix}/{cleaned}" if prefix and "/" not in cleaned else cleaned
+
+    # Tải qua boto3 direct nếu có key S3
+    if key and is_configured(cfg):
+        try:
+            client = _get_s3_client(cfg)
+            resp = client.get_object(Bucket=bucket, Key=key)
+            data = resp["Body"].read()
+            cache_path.write_bytes(data)
+            return cache_path
+        except Exception as e:
+            pass
+
+    # Tải qua HTTP request (presigned URL hoặc URL công khai)
+    try:
+        download_url = get_presigned_url(raw_str, cfg=cfg) if is_s3_url(raw_str, cfg) else raw_str
+        req = urllib.request.Request(download_url, headers={"User-Agent": "Mozilla/5.0"})
+        ctx = ssl.create_default_context()
+        ctx.check_hostname = False
+        ctx.verify_mode = ssl.CERT_NONE
+        with urllib.request.urlopen(req, timeout=20, context=ctx) as resp:
+            data = resp.read()
+            cache_path.write_bytes(data)
+            return cache_path
+    except Exception as e:
+        print(f"[!] Lỗi tải media proxy cho {raw_str}: {e}")
+        return None
+
+
+def resolve_ai_media_url(url_or_source: str, cfg: Optional[dict] = None) -> str:
+    """Đảm bảo URL gửi qua AI luôn là link S3 presigned 24h.
+    Áp dụng cho cả ảnh và video tham chiếu.
+    """
+    if not url_or_source or not isinstance(url_or_source, str):
+        return ""
+
+    raw_str = url_or_source.strip()
+    if not raw_str:
+        return ""
+
+    cfg = cfg or get_ai_config()
+
+    # Nếu là link proxy UI /api/media/proxy?url=...
+    if "/api/media/proxy" in raw_str:
+        try:
+            parsed = urlparse(raw_str)
+            qs = parse_qs(parsed.query)
+            target = qs.get("url", [""])[0]
+            if target:
+                raw_str = target.strip()
+        except Exception:
+            pass
+
+    # Nếu là data URI hoặc file cục bộ -> upload lên S3 lấy link presigned 24h
+    if raw_str.startswith("data:") or (not raw_str.startswith(("http://", "https://")) and os.path.exists(raw_str)):
+        if is_configured(cfg):
+            try:
+                return upload_reference_image(raw_str, cfg=cfg)
+            except Exception as e:
+                print(f"[!] Warning uploading reference to S3: {e}")
+
+    # Nếu là link S3 -> sinh presigned URL 24h
+    if is_s3_url(raw_str, cfg) or not raw_str.startswith(("http://", "https://")):
+        return get_presigned_url(raw_str, expires_in=DEFAULT_PRESIGNED_EXPIRES, cfg=cfg)
+
+    return raw_str
+
+
+def get_presigned_url(url_or_key: str, expires_in: int = DEFAULT_PRESIGNED_EXPIRES, cfg: Optional[dict] = None) -> str:
+    """Tạo presigned URL 24h cho các đối tượng S3 trong bucket private.
+
+    Tự động trích xuất key từ direct S3 URL hoặc relative path, và ký lại nếu cần.
+    Giữ nguyên các URL ngoại vi (CDN ngoài) hoặc data URI.
+    """
+    if not url_or_key or not isinstance(url_or_key, str):
+        return ""
+
+    url_str = url_or_key.strip()
+    if not url_str or url_str.startswith("data:") or url_str.startswith("/media/"):
+        return url_str
+
+    cfg = cfg or get_ai_config()
+    if not is_configured(cfg):
+        return url_str
+
+    bucket = cfg.get("s3_bucket", "")
+    if not bucket:
+        return url_str
+
+    # Trích xuất S3 object key
+    key = ""
+    if url_str.startswith(("http://", "https://")):
+        if not is_s3_url(url_str, cfg):
+            return url_str
+        parsed = urlparse(url_str)
+        path = unquote(parsed.path.lstrip("/"))
+        if bucket and path.startswith(f"{bucket}/"):
+            key = path[len(bucket) + 1:]
+        else:
+            key = path
+    else:
+        cleaned = url_str.lstrip("/")
+        if cleaned.startswith("images/"):
+            cleaned = cleaned[len("images/"):]
+        prefix = (cfg.get("s3_key_prefix") or "ai_prompts_database").strip("/")
+        if "/" in cleaned:
+            key = cleaned
+        else:
+            key = f"{prefix}/{cleaned}" if prefix else cleaned
+
+    if not key:
+        return url_str
+
+    # Kiểm tra cache (tự động làm mới trước khi hết hạn 1 giờ)
+    now = time.time()
+    cached = _PRESIGNED_CACHE.get(key)
+    if cached and (cached[1] - now > 3600):
+        return cached[0]
+
+    try:
+        client = _get_s3_client(cfg)
+        presigned = client.generate_presigned_url(
+            "get_object",
+            Params={"Bucket": bucket, "Key": key},
+            ExpiresIn=expires_in,
+        )
+        _PRESIGNED_CACHE[key] = (presigned, now + expires_in)
+        return presigned
+    except Exception as e:
+        print(f"[!] Warning generating presigned URL for {key}: {e}")
+        return url_str
 
 
 def is_configured(cfg: Optional[dict] = None) -> bool:
@@ -135,7 +346,7 @@ def upload_content_to_s3(
     presigned_url = client.generate_presigned_url(
         "get_object",
         Params={"Bucket": cfg["s3_bucket"], "Key": key},
-        ExpiresIn=604800,  # 7 days
+        ExpiresIn=DEFAULT_PRESIGNED_EXPIRES,  # 24 hours
     )
 
     return {
@@ -202,11 +413,11 @@ def upload_reference_image(source: str, cfg: Optional[dict] = None, is_koc: bool
 
     client.put_object(Bucket=cfg["s3_bucket"], Key=key, Body=content, ContentType=mime)
 
-    # Return presigned URL (valid 7 days) so external AI providers can always access it
+    # Return presigned URL (valid 24h) so external AI providers can always access it
     return client.generate_presigned_url(
         "get_object",
         Params={"Bucket": cfg["s3_bucket"], "Key": key},
-        ExpiresIn=604800,
+        ExpiresIn=DEFAULT_PRESIGNED_EXPIRES,
     )
 
 

@@ -53,9 +53,12 @@ Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{
 Source: "..\dist\AIPromptStudio\{#MyAppExeName}"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\dist\AIPromptStudio\_internal\*"; DestDir: "{app}\_internal"; Flags: ignoreversion recursesubdirs createallsubdirs
 Source: "..\.version"; DestDir: "{app}"; Flags: ignoreversion
+Source: "..\.env.example"; DestDir: "{app}"; DestName: ".env"; Flags: onlyifdoesntexist uninsneveruninstall; Permissions: users-modify
+Source: "..\.env.example"; DestDir: "{app}"; DestName: ".env.example"; Flags: ignoreversion; Permissions: users-modify
 
-; Create empty data dirs if not exist
+; Create empty data dirs with permissions
 Source: "..\.version"; DestDir: "{app}\data"; Flags: uninsneveruninstall; Permissions: users-modify
+Source: "..\.version"; DestDir: "{app}\data\thumbnails"; Flags: uninsneveruninstall; Permissions: users-modify
 Source: "..\.version"; DestDir: "{app}\data\images"; Flags: uninsneveruninstall; Permissions: users-modify
 
 [Icons]

@@ -137,6 +137,28 @@
         </div>
     </header>
 
+    <!-- Setup Notice Banner (Visible when SETUP_DONE = false or AFFILIATE_ROOT empty) -->
+    <div id="setupBanner" class="hidden bg-gradient-to-r from-amber-950/80 via-dark-850 to-amber-950/80 border-b border-amber-500/40 px-4 py-2 flex flex-wrap items-center justify-between gap-2 text-xs z-30 transition-all">
+        <div class="flex items-center gap-2.5 text-amber-300 font-medium">
+            <span class="flex h-2.5 w-2.5 relative flex-shrink-0">
+                <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-amber-400 opacity-75"></span>
+                <span class="relative inline-flex rounded-full h-2.5 w-2.5 bg-amber-500"></span>
+            </span>
+            <span>Chưa hoàn tất cấu hình: <code class="bg-dark-900 px-1.5 py-0.5 rounded text-amber-200 border border-amber-600/30 font-mono text-[11px]">SETUP_DONE=false</code> hoặc chưa trỏ <code class="bg-dark-900 px-1.5 py-0.5 rounded text-amber-200 border border-amber-600/30 font-mono text-[11px]">AFFILIATE_ROOT</code></span>
+        </div>
+        <div class="flex items-center gap-2">
+            <button onclick="openEnvFile()" class="px-2.5 py-1 rounded bg-amber-500/20 hover:bg-amber-500/30 text-amber-200 border border-amber-500/40 transition flex items-center gap-1.5 font-medium">
+                <i class="fa-solid fa-file-pen text-amber-400"></i> Mở tệp .env
+            </button>
+            <button onclick="openEnvDir()" class="px-2.5 py-1 rounded bg-dark-750 hover:bg-dark-700 text-slate-300 border border-dark-600 transition flex items-center gap-1.5">
+                <i class="fa-solid fa-folder-open text-slate-400"></i> Mở thư mục
+            </button>
+            <button onclick="openSetupGuideModal()" class="px-2.5 py-1 rounded bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-dark-900 font-semibold transition flex items-center gap-1.5 shadow-sm">
+                <i class="fa-solid fa-circle-question"></i> Hướng dẫn cấu hình
+            </button>
+        </div>
+    </div>
+
     <!-- Main Workspace Container -->
     <div class="flex-1 flex overflow-hidden min-h-0">
 
@@ -325,6 +347,14 @@
 
                         <!-- Slider Canvas (Takes available vertical space cleanly) -->
                         <div id="sliderWrapper" class="relative group rounded-xl overflow-hidden bg-dark-900 flex-1 min-h-0 flex items-center justify-center border border-dark-700 my-3">
+                            <!-- Media Loading Spinner -->
+                            <div id="mediaLoadingSpinner" class="hidden absolute inset-0 bg-dark-900/85 backdrop-blur-[3px] z-20 flex flex-col items-center justify-center gap-2.5 text-brand-400 select-none transition-opacity duration-200">
+                                <div class="w-10 h-10 rounded-xl bg-brand-500/15 border border-brand-500/30 flex items-center justify-center shadow-lg shadow-brand-500/10 text-brand-400 text-lg">
+                                    <i class="fa-solid fa-circle-notch fa-spin"></i>
+                                </div>
+                                <span class="text-xs font-medium text-slate-300">Đang tải hiển thị...</span>
+                            </div>
+
                             <!-- Image Element -->
                             <img id="currentSliderImg" src="" alt="Prompt Preview"
                                  class="w-full h-full object-contain transition-transform duration-300 select-none cursor-pointer"
@@ -2084,8 +2114,110 @@
         </div>
     </div>
 
+    <!-- Setup Guide Modal -->
+    <div id="setupGuideModal" class="fixed inset-0 bg-black/80 backdrop-blur-md z-[110] hidden flex items-center justify-center p-4">
+        <div class="bg-dark-850 border border-amber-500/40 rounded-2xl shadow-2xl w-full max-w-2xl overflow-hidden flex flex-col max-h-[90vh]">
+            <!-- Header -->
+            <div class="p-5 border-b border-dark-700 bg-gradient-to-r from-amber-950/40 via-dark-800 to-dark-850 flex items-center justify-between">
+                <div class="flex items-center gap-3">
+                    <div class="w-10 h-10 rounded-xl bg-amber-500/20 text-amber-400 flex items-center justify-center border border-amber-500/30 text-lg shadow-inner">
+                        <i class="fa-solid fa-sliders"></i>
+                    </div>
+                    <div>
+                        <h3 class="text-base font-bold text-white flex items-center gap-2">
+                            Cấu Hình Ban Đầu (.env)
+                            <span class="text-[11px] font-mono px-2 py-0.5 rounded-full bg-amber-500/10 text-amber-400 border border-amber-500/30">Cần thiết lập</span>
+                        </h3>
+                        <p class="text-xs text-slate-400 mt-0.5">Ứng dụng cần liên kết với thư mục Affiliate Tools và thiết lập khóa AI</p>
+                    </div>
+                </div>
+                <button onclick="closeSetupGuideModal()" class="text-slate-400 hover:text-white p-2 rounded-lg hover:bg-dark-750 transition">
+                    <i class="fa-solid fa-xmark text-lg"></i>
+                </button>
+            </div>
+
+            <!-- Body -->
+            <div class="p-6 overflow-y-auto space-y-5 text-sm">
+                <!-- Location box -->
+                <div class="p-4 rounded-xl bg-dark-900/80 border border-dark-700 space-y-2">
+                    <div class="flex items-center justify-between">
+                        <span class="text-xs font-semibold text-slate-400 uppercase tracking-wider">Vị trí tệp .env trên máy:</span>
+                        <div class="flex gap-2">
+                            <button onclick="openEnvFile()" class="px-2.5 py-1 text-xs rounded bg-brand-600 hover:bg-brand-500 text-white font-medium transition flex items-center gap-1.5 shadow-sm">
+                                <i class="fa-solid fa-file-pen"></i> Mở tệp .env
+                            </button>
+                            <button onclick="openEnvDir()" class="px-2.5 py-1 text-xs rounded bg-dark-750 hover:bg-dark-700 text-slate-300 transition flex items-center gap-1.5">
+                                <i class="fa-solid fa-folder-open"></i> Mở thư mục
+                            </button>
+                        </div>
+                    </div>
+                    <code id="setupEnvPathDisplay" class="block p-2.5 rounded-lg bg-dark-950 font-mono text-xs text-emerald-400 break-all border border-dark-800 select-all">
+                        Đang tải đường dẫn tệp .env...
+                    </code>
+                </div>
+
+                <!-- Steps -->
+                <div class="space-y-4">
+                    <div class="flex gap-3.5">
+                        <div class="w-6 h-6 rounded-full bg-brand-500/20 text-brand-400 font-bold text-xs flex items-center justify-center flex-shrink-0 mt-0.5 border border-brand-500/30">1</div>
+                        <div class="space-y-1">
+                            <h4 class="font-semibold text-slate-200">Mở tệp .env lên chỉnh sửa</h4>
+                            <p class="text-xs text-slate-400 leading-relaxed">
+                                Bấm nút <strong>"Mở tệp .env"</strong> ở trên (hoặc chuột phải vào <strong>icon khay hệ thống</strong> &rarr; chọn <strong>"Cấu hình .env"</strong>). Tệp sẽ được mở trong Notepad.
+                            </p>
+                        </div>
+                    </div>
+
+                    <div class="flex gap-3.5">
+                        <div class="w-6 h-6 rounded-full bg-brand-500/20 text-brand-400 font-bold text-xs flex items-center justify-center flex-shrink-0 mt-0.5 border border-brand-500/30">2</div>
+                        <div class="space-y-2">
+                            <h4 class="font-semibold text-slate-200">Điền các thông số quan trọng</h4>
+                            <div class="space-y-2 text-xs">
+                                <div class="p-3 rounded-lg bg-dark-900 border border-dark-750">
+                                    <div class="text-brand-400 font-mono font-semibold">AFFILIATE_ROOT=D:/Affiliate_Tools</div>
+                                    <div class="text-slate-400 mt-1">Đường dẫn tới thư mục gốc Affiliate Tools. Nếu thư mục đích chưa có database, ứng dụng sẽ <strong>tự động khởi tạo</strong> tệp DB cho bạn.</div>
+                                </div>
+                                <div class="p-3 rounded-lg bg-dark-900 border border-dark-750">
+                                    <div class="text-brand-400 font-mono font-semibold">AI_API_KEY=sk-...</div>
+                                    <div class="text-slate-400 mt-1">Khóa API AI (OpenAI hoặc dịch vụ tương thích) để tạo và tối ưu prompt, ảnh, video.</div>
+                                </div>
+                                <div class="p-3 rounded-lg bg-dark-900 border border-dark-750">
+                                    <div class="text-emerald-400 font-mono font-semibold">SETUP_DONE=true</div>
+                                    <div class="text-slate-400 mt-1">Đổi giá trị từ <code class="text-rose-400">false</code> sang <code class="text-emerald-400">true</code> sau khi cấu hình xong.</div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="flex gap-3.5">
+                        <div class="w-6 h-6 rounded-full bg-brand-500/20 text-brand-400 font-bold text-xs flex items-center justify-center flex-shrink-0 mt-0.5 border border-brand-500/30">3</div>
+                        <div class="space-y-1">
+                            <h4 class="font-semibold text-slate-200">Lưu tệp và tải lại</h4>
+                            <p class="text-xs text-slate-400 leading-relaxed">
+                                Nhấn <kbd class="px-1.5 py-0.5 rounded bg-dark-750 text-slate-300 font-mono text-[10px]">Ctrl + S</kbd> trong Notepad để lưu, sau đó nhấn nút <strong>"Tải lại trang"</strong> bên dưới.
+                            </p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Footer -->
+            <div class="p-4 border-t border-dark-700 bg-dark-800/80 flex items-center justify-between">
+                <span class="text-xs text-slate-500 hidden sm:inline">Mẹo: Chuột phải icon khay hệ thống &rarr; chọn "Cấu hình .env" bất kỳ lúc nào.</span>
+                <div class="flex gap-2 ml-auto">
+                    <button onclick="closeSetupGuideModal()" class="px-4 py-2 rounded-xl bg-dark-750 hover:bg-dark-700 text-slate-300 text-xs font-semibold transition">
+                        Đóng
+                    </button>
+                    <button onclick="window.location.reload()" class="px-4 py-2 rounded-xl bg-gradient-to-r from-brand-600 to-emerald-600 text-white text-xs font-semibold transition hover:shadow-lg flex items-center gap-1.5">
+                        <i class="fa-solid fa-arrows-rotate"></i> Tải lại trang
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <!-- App JavaScript Logic -->
-    <script src="/static/js/app.js?v=3.4.2"></script>
+    <script src="/static/js/app.js?v=3.4.4"></script>
 </body>
 
 </html>

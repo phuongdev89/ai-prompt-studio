@@ -567,6 +567,11 @@ def call_ai_generate_image_stream(
     full_prompt = "\n\n".join(parts)
     full_prompt = sanitize_prompt_for_image_generation(full_prompt)
 
+    # Đảm bảo ảnh gửi qua AI luôn là link S3 presigned 24h
+    if reference_image:
+        from app.services.s3_storage import resolve_ai_media_url
+        reference_image = resolve_ai_media_url(reference_image, cfg=cfg)
+
     yield from stream_openai_images_generations(
         base_url=base_url,
         api_key=api_key,
@@ -600,6 +605,12 @@ def call_ai_generate_image(
         parts.append(f"[Yêu cầu phụ]: {extra_description.strip()}")
     full_prompt = "\n\n".join(parts)
     full_prompt = sanitize_prompt_for_image_generation(full_prompt)
+
+    # Đảm bảo ảnh gửi qua AI luôn là link S3 presigned 24h
+    if reference_image:
+        from app.services.s3_storage import resolve_ai_media_url
+        reference_image = resolve_ai_media_url(reference_image, cfg=cfg)
+
     image_source = call_openai_images_generations(
         base_url, api_key, model_name, full_prompt, timeout,
         reference_image=reference_image, image_detail=image_detail,

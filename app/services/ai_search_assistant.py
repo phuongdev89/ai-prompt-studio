@@ -217,14 +217,17 @@ def enrich_recommended_prompts(recs: List[Dict[str, Any]]) -> List[Dict[str, Any
             ORDER BY order_index ASC, id ASC
         """, prompt_ids)
         img_rows = cursor.fetchall()
+        from urllib.parse import quote
         img_map = {}
         for r in img_rows:
             if r["prompt_id"] not in img_map:
+                raw_target = r.get("url") or r.get("filename") or ""
                 img_path = ""
-                if r.get("filename"):
-                    img_path = f"/media/{r['filename']}"
-                elif r.get("url"):
-                    img_path = r["url"]
+                if raw_target:
+                    if raw_target.startswith("data:"):
+                        img_path = raw_target
+                    else:
+                        img_path = f"/api/media/proxy?url={quote(raw_target)}"
                 img_map[r["prompt_id"]] = img_path
 
         cursor.execute(f"""

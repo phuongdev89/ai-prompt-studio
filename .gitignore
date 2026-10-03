@@ -50,3 +50,4 @@ data/images/*
 .agents/
 .claude
 scratch
+.cache

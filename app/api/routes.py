@@ -400,6 +400,31 @@ def migrate_db_images_endpoint():
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Lỗi khi di chuyển ảnh lên S3: {exc}") from exc
 
+@router.get("/s3/presign")
+def presign_s3_url_endpoint(url: str = Query(..., description="S3 URL or key to presign")):
+    """Sinh presigned URL 24h cho S3 bucket private."""
+    from app.services.s3_storage import get_presigned_url
+    presigned = get_presigned_url(url)
+    return {"url": presigned}
+
+@router.get("/media/proxy")
+def media_proxy_endpoint(url: str = Query(..., description="Media URL or key to proxy")):
+    """Proxy hiển thị ảnh/video: lưu thumbnail vào thư mục và tái sử dụng từ đĩa cục bộ."""
+    from app.services.s3_storage import get_or_download_thumbnail, get_presigned_url
+    from fastapi.responses import FileResponse, RedirectResponse
+    import mimetypes
+
+    local_path = get_or_download_thumbnail(url)
+    if local_path and local_path.exists():
+        mime, _ = mimetypes.guess_type(str(local_path))
+        return FileResponse(str(local_path), media_type=mime or "application/octet-stream")
+
+    # Fallback chuyển hướng sang presigned 24h nếu chưa tải được
+    presigned = get_presigned_url(url)
+    if presigned and presigned.startswith(("http://", "https://")):
+        return RedirectResponse(presigned, status_code=307)
+    raise HTTPException(status_code=404, detail="Không tìm thấy tệp phương tiện")
+
 @router.delete("/prompts/{prompt_id}")
 @router.delete("/prompts/{prompt_id}/")
 @router.post("/prompts/{prompt_id}/delete")
@@ -1440,7 +1465,7 @@ def ping_ai_endpoint(
 @router.get("/config")
 def get_config():
     """Trả về cấu hình AI hiện tại (ẩn API key)."""
-    from app.config import get_ai_config, is_setup_done
+    from app.config import get_ai_config, is_setup_done, ENV_PATH, BASE_DIR, DB_PATH
     cfg = get_ai_config()
     return {
         "provider": "openai",
@@ -1463,7 +1488,50 @@ def get_config():
         "timeout": cfg.get("timeout"),
         "stream": cfg.get("stream"),
         "setup_done": is_setup_done(),
+        "affiliate_root": cfg.get("affiliate_root", ""),
+        "env_path": str(ENV_PATH),
+        "env_dir": str(BASE_DIR),
+        "db_path": str(DB_PATH),
     }
+
+@router.post("/config/open-env")
+def open_env_file_endpoint():
+    """Mở file .env mặc định bằng Notepad của Windows."""
+    import os, shutil, subprocess
+    from app.config import ENV_PATH, BASE_DIR
+    try:
+        if not ENV_PATH.exists():
+            example = BASE_DIR / ".env.example"
+            if example.exists():
+                shutil.copyfile(example, ENV_PATH)
+            else:
+                ENV_PATH.write_text("SETUP_DONE=false\nAFFILIATE_ROOT=\n", encoding="utf-8")
+        subprocess.Popen(["notepad.exe", str(ENV_PATH)])
+        return {"ok": True, "message": "Đã mở file .env bằng Notepad"}
+    except Exception as e:
+        return {"ok": False, "message": f"Không thể mở file .env: {e}"}
+
+@router.post("/db/backup")
+def backup_db_endpoint():
+    """Tạo bản sao lưu database."""
+    from app.config import backup_database, get_backup_dir
+    if not get_backup_dir():
+        return {"ok": False, "message": "Chưa thiết lập AFFILIATE_ROOT trong file .env"}
+    bk = backup_database()
+    if bk:
+        return {"ok": True, "message": f"Đã sao lưu thành công: {bk.name}", "file": str(bk)}
+    return {"ok": False, "message": "Không tìm thấy database để sao lưu hoặc lỗi sao lưu"}
+
+@router.post("/config/open-dir")
+def open_env_dir_endpoint():
+    """Mở thư mục chứa file .env trong File Explorer."""
+    import os
+    from app.config import BASE_DIR
+    try:
+        os.startfile(str(BASE_DIR))
+        return {"ok": True, "message": "Đã mở thư mục cài đặt"}
+    except Exception as e:
+        return {"ok": False, "message": f"Không thể mở thư mục: {e}"}
 
 @router.post("/config")
 async def save_config(request: Request):

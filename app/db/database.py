@@ -25,20 +25,97 @@ def get_db():
     finally:
         conn.close()
 
+def _migrate_from_json(json_path, db_path):
+    import json
+    if not json_path.exists():
+        return
+    with open(json_path, "r", encoding="utf-8") as f:
+        prompts = json.load(f)
+    conn = sqlite3.connect(db_path)
+    cursor = conn.cursor()
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS prompts (
+            id TEXT PRIMARY KEY,
+            original_index INTEGER,
+            title TEXT NOT NULL,
+            raw_title TEXT,
+            prompt_type TEXT,
+            raw_content TEXT,
+            prompt_code TEXT,
+            parsed_json TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS images (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            prompt_id TEXT NOT NULL,
+            url TEXT NOT NULL,
+            local_path TEXT,
+            filename TEXT,
+            status TEXT DEFAULT 'pending',
+            file_size INTEGER DEFAULT 0,
+            FOREIGN KEY (prompt_id) REFERENCES prompts(id) ON DELETE CASCADE
+        )
+    """)
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS prompt_fields (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            prompt_id TEXT NOT NULL,
+            field_path TEXT,
+            field_key TEXT,
+            label TEXT,
+            field_value TEXT,
+            field_type TEXT DEFAULT 'text',
+            is_list INTEGER DEFAULT 0,
+            FOREIGN KEY (prompt_id) REFERENCES prompts(id) ON DELETE CASCADE
+        )
+    """)
+    prompt_rows, image_rows, field_rows = [], [], []
+    for item in prompts:
+        p_id = item.get("id")
+        parsed_str = json.dumps(item.get("parsed_json"), ensure_ascii=False) if item.get("parsed_json") else None
+        prompt_rows.append((p_id, item.get("original_index"), item.get("title", ""), item.get("raw_title", ""), item.get("prompt_type", "text"), item.get("raw_content", ""), item.get("prompt_code", ""), parsed_str))
+        for idx, img_url in enumerate(item.get("images", [])):
+            if img_url and isinstance(img_url, str):
+                fn = f"{p_id}_img_{idx + 1}.jpg"
+                image_rows.append((p_id, img_url, f"images/{fn}", fn, "pending", 0))
+        for field in item.get("fields", []):
+            field_rows.append((p_id, field.get("path", ""), field.get("key", ""), field.get("label", ""), str(field.get("value", "")), field.get("type", "text"), 1 if field.get("is_list") else 0))
+    cursor.executemany("INSERT OR IGNORE INTO prompts (id, original_index, title, raw_title, prompt_type, raw_content, prompt_code, parsed_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?)", prompt_rows)
+    cursor.executemany("INSERT OR IGNORE INTO images (prompt_id, url, local_path, filename, status, file_size) VALUES (?, ?, ?, ?, ?, ?)", image_rows)
+    cursor.executemany("INSERT OR IGNORE INTO prompt_fields (prompt_id, field_path, field_key, label, field_value, field_type, is_list) VALUES (?, ?, ?, ?, ?, ?, ?)", field_rows)
+    conn.commit()
+    conn.close()
+
 def ensure_database():
+    from app.config import get_bundled_db_path, DATA_DIR, IMAGES_DIR
+    import shutil
+
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
+    IMAGES_DIR.mkdir(parents=True, exist_ok=True)
+
     if not DB_PATH.exists():
-        print(f"[!] Database not found at {DB_PATH}. Initializing and migrating...")
-        from tests.migrate_json_to_sqlite import migrate
-        migrate(json_path=JSON_DATA_PATH, db_path=DB_PATH)
+        print(f"[!] Database not found at {DB_PATH}. Initializing...")
+        bundled = get_bundled_db_path()
+        copied = False
+        if bundled and bundled.exists() and bundled.resolve() != DB_PATH.resolve():
+            try:
+                shutil.copy2(bundled, DB_PATH)
+                copied = True
+                print(f"[*] Copied bundled DB from {bundled} to {DB_PATH}")
+            except Exception as e:
+                print(f"[!] Failed to copy bundled DB: {e}")
+        if not copied:
+            _migrate_from_json(JSON_DATA_PATH, DB_PATH)
     else:
         # Check if tables exist
         with get_db() as conn:
             cursor = conn.cursor()
             cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='prompts'")
             if not cursor.fetchone():
-                print("[!] Tables not found in database. Running migration...")
-                from tests.migrate_json_to_sqlite import migrate
-                migrate(json_path=JSON_DATA_PATH, db_path=DB_PATH)
+                print("[!] Tables not found in database. Initializing...")
+                _migrate_from_json(JSON_DATA_PATH, DB_PATH)
 
     # Ensure columns and tables exist
     with get_db() as conn:
@@ -84,6 +161,20 @@ def ensure_database():
 
         # Migration: convert legacy 'character' category to 'image'
         cursor.execute("UPDATE prompts SET category = 'image' WHERE category = 'character' OR category IS NULL OR category = ''")
+
+        # 5. Ensure prompt_tags table exists
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS prompt_tags (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                prompt_id TEXT NOT NULL,
+                tag TEXT NOT NULL COLLATE NOCASE,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (prompt_id) REFERENCES prompts(id) ON DELETE CASCADE,
+                UNIQUE(prompt_id, tag)
+            )
+        """)
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_prompt_tags_tag ON prompt_tags(tag);")
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_prompt_tags_prompt_id ON prompt_tags(prompt_id);")
 
         # Migration: ensure 'Character' tag is assigned to all existing prompts in category = 'image'
         cursor.execute("""

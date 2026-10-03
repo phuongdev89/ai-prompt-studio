@@ -2,7 +2,8 @@
 # -*- coding: utf-8 -*-
 """
 AI Prompt Studio - System Tray Management Module.
-Chứa lớp TrayApp quản lý biểu tượng khay hệ thống (pystray) và vòng đời Web Server Subprocess.
+Quản lý biểu tượng khay hệ thống (pystray), kiểm tra đơn thực thể (Single Instance),
+và vòng đời Web Server (Uvicorn).
 """
 
 import os
@@ -12,8 +13,8 @@ import socket
 import signal
 import atexit
 import random
+import ctypes
 import threading
-import subprocess
 import webbrowser
 from pathlib import Path
 from typing import Optional
@@ -21,34 +22,36 @@ from typing import Optional
 import pystray
 from pystray import MenuItem as item, Menu
 from PIL import Image, ImageDraw
+import uvicorn
 
-# Đảm bảo stdout/stderr không bị lỗi khi chạy ở chế độ ẩn không có console (windowless)
+# Đảm bảo stdout/stderr an toàn khi chạy ở chế độ ẩn (windowless)
 if sys.stdout is None:
     sys.stdout = open(os.devnull, "w", encoding="utf-8")
 if sys.stderr is None:
     sys.stderr = open(os.devnull, "w", encoding="utf-8")
 
-ROOT_DIR = Path(__file__).resolve().parent.parent
+if getattr(sys, "frozen", False):
+    ROOT_DIR = Path(sys.executable).resolve().parent
+else:
+    ROOT_DIR = Path(__file__).resolve().parent.parent
 
-# Thư mục cache và file log
 CACHE_DIR = ROOT_DIR / ".cache"
 CACHE_DIR.mkdir(parents=True, exist_ok=True)
 LOG_FILE_PATH = CACHE_DIR / "server.log"
+URL_FILE_PATH = CACHE_DIR / "server.url"
 ICON_PATH = ROOT_DIR / "assets" / "icon.png"
+
+MUTEX_NAME = r"Local\AIPromptStudio_SingleInstance"
+ERROR_ALREADY_EXISTS = 183
 
 
 def log_message(msg: str):
-    """Ghi log vào file .cache/server.log và in ra console nếu có."""
+    """Ghi log vào file .cache/server.log."""
     timestamp = time.strftime("%Y-%m-%d %H:%M:%S")
     formatted = f"[{timestamp}] [TRAY] {msg}"
     try:
         with open(LOG_FILE_PATH, "a", encoding="utf-8") as f:
             f.write(formatted + "\n")
-    except Exception:
-        pass
-    try:
-        if sys.stdout and not sys.stdout.closed:
-            print(formatted)
     except Exception:
         pass
 
@@ -57,7 +60,6 @@ def create_default_icon_image(size: int = 64) -> Image.Image:
     """Tạo icon mặc định sắc nét bằng Pillow (RGBA)."""
     img = Image.new("RGBA", (size, size), (0, 0, 0, 0))
     draw = ImageDraw.Draw(img)
-    # Nền bo góc mềm mại màu ngọc bích / emerald
     draw.rounded_rectangle(
         [2, 2, size - 3, size - 3],
         radius=14,
@@ -65,7 +67,6 @@ def create_default_icon_image(size: int = 64) -> Image.Image:
         outline=(52, 211, 153, 255),
         width=2,
     )
-    # Biểu tượng tia sáng / AI ở giữa
     center = size // 2
     draw.polygon(
         [
@@ -84,12 +85,16 @@ def create_default_icon_image(size: int = 64) -> Image.Image:
 
 
 def load_icon_image() -> Image.Image:
-    """Nạp ảnh icon từ tệp tĩnh assets/icon.png hoặc tự tạo nếu chưa có."""
+    """Nạp icon từ assets/icon.ico hoặc icon.png."""
     candidates = [
-        ICON_PATH,
         ROOT_DIR / "assets" / "icon.ico",
+        ROOT_DIR / "assets" / "icon.png",
+        ROOT_DIR / "_internal" / "assets" / "icon.ico",
+        ROOT_DIR / "_internal" / "assets" / "icon.png",
         ROOT_DIR / "app" / "static" / "favicon.png",
         ROOT_DIR / "app" / "static" / "favicon.ico",
+        ROOT_DIR / "_internal" / "app" / "static" / "favicon.png",
+        ROOT_DIR / "_internal" / "app" / "static" / "favicon.ico",
     ]
     for p in candidates:
         if p.exists():
@@ -108,7 +113,7 @@ def load_icon_image() -> Image.Image:
 
 
 def is_port_available(port: int, host: str = "127.0.0.1") -> bool:
-    """Kiểm tra xem một cổng mạng có khả dụng (trống) không."""
+    """Kiểm tra cổng mạng có khả dụng không."""
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
         s.settimeout(0.3)
         try:
@@ -118,72 +123,24 @@ def is_port_available(port: int, host: str = "127.0.0.1") -> bool:
             return False
 
 
-def find_random_free_port(
-    min_port: int = 8000, max_port: int = 9999, host: str = "127.0.0.1"
-) -> int:
-    """Ưu tiên cổng 8000, nếu đã bị chiếm thì tìm một cổng ngẫu nhiên khả dụng trong dải."""
+def find_free_port(host: str = "127.0.0.1") -> int:
+    """Ưu tiên cổng 8000, nếu bị chiếm thì lấy cổng trống ngẫu nhiên."""
     if is_port_available(8000, host):
         return 8000
-
-    ports = list(range(min_port, max_port + 1))
-    random.shuffle(ports)
-    for port in ports[:50]:
-        if is_port_available(port, host):
-            return port
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
         s.bind((host, 0))
         return s.getsockname()[1]
 
 
-def terminate_process(proc: Optional[subprocess.Popen]):
-    """Tắt sạch sẽ một tiến trình con trên Windows (bao gồm cả cây tiến trình con)."""
-    if not proc:
-        return
-    if proc.poll() is not None:
-        return
-    try:
-        # Dùng taskkill /F /T trên Windows để dọn dẹp toàn bộ process tree
-        subprocess.run(
-            ["taskkill", "/F", "/T", "/PID", str(proc.pid)],
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            timeout=5,
-        )
-    except Exception:
-        try:
-            proc.terminate()
-            proc.wait(timeout=3)
-        except Exception:
-            try:
-                proc.kill()
-            except Exception:
-                pass
-
-
-def get_python_exe() -> Path:
-    """Xác định đường dẫn python.exe phù hợp."""
-    venv_py = ROOT_DIR / ".venv" / "Scripts" / "python.exe"
-    if venv_py.exists():
-        return venv_py
-    venv_py2 = ROOT_DIR / "venv" / "Scripts" / "python.exe"
-    if venv_py2.exists():
-        return venv_py2
-
-    cur = Path(sys.executable)
-    if cur.name.lower() == "pythonw.exe":
-        sibling = cur.parent / "python.exe"
-        if sibling.exists():
-            return sibling
-    return cur
-
-
 class TrayApp:
-    """Quản lý System Tray Icon và điều khiển vòng đời Uvicorn Server Subprocess."""
+    """Quản lý System Tray Icon và Uvicorn Server."""
 
-    def __init__(self):
+    def __init__(self, mutex_handle=None):
+        self._mutex = mutex_handle
         self.host = "127.0.0.1"
-        self.port = find_random_free_port(host=self.host)
-        self.server_process: Optional[subprocess.Popen] = None
+        self.port = find_free_port(host=self.host)
+        self.server: Optional[uvicorn.Server] = None
+        self.server_thread: Optional[threading.Thread] = None
         self.icon: Optional[pystray.Icon] = None
         self._lock = threading.Lock()
         self._is_restarting = False
@@ -193,149 +150,172 @@ class TrayApp:
         return f"http://{self.host}:{self.port}"
 
     def start_server(self, reuse_port: bool = True):
-        """Khởi động Uvicorn server trong một tiến trình con (Subprocess) hoàn toàn ẩn."""
+        """Khởi động Uvicorn server trong thread ngầm."""
         with self._lock:
-            # Nếu cần dùng lại port cũ (ví dụ khi Restart)
-            if reuse_port and self.port:
-                start_wait = time.time()
-                while time.time() - start_wait < 3.0:
-                    if is_port_available(self.port, self.host):
-                        break
-                    time.sleep(0.2)
-                if not is_port_available(self.port, self.host):
-                    self.port = find_random_free_port(host=self.host)
-            else:
-                self.port = find_random_free_port(host=self.host)
+            if not reuse_port or not self.port or not is_port_available(self.port, self.host):
+                self.port = find_free_port(host=self.host)
 
-            env = os.environ.copy()
-            root_dir_str = str(ROOT_DIR.resolve())
-            if "PYTHONPATH" in env:
-                env["PYTHONPATH"] = f"{root_dir_str}{os.pathsep}{env['PYTHONPATH']}"
-            else:
-                env["PYTHONPATH"] = root_dir_str
-
-            env["PYTHONIOENCODING"] = "utf-8"
-            env["PYTHONUTF8"] = "1"
-
-            py_exe = get_python_exe()
-            cmd = [
-                str(py_exe),
-                str(ROOT_DIR / "run.py"),
-                "--host",
-                self.host,
-                "--port",
-                str(self.port),
-                "--no-browser",
-            ]
-
-            log_message(f"🚀 AI Prompt Studio đang khởi động tại: {self.url} (Port: {self.port})")
-
-            # Thiết lập ẩn hoàn toàn cửa sổ console cho tiến trình con trên Windows
-            startupinfo = None
-            creationflags = 0
-            if sys.platform == "win32":
-                startupinfo = subprocess.STARTUPINFO()
-                startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
-                startupinfo.wShowWindow = 0  # SW_HIDE
-                creationflags = subprocess.CREATE_NO_WINDOW
-
+            log_message(f"Khởi động server tại {self.url}...")
             try:
-                log_file = open(LOG_FILE_PATH, "a", encoding="utf-8", errors="replace")
-                log_file.write(f"\n--- KHỞI ĐỘNG SERVER MỚI [{time.strftime('%Y-%m-%d %H:%M:%S')}] TẠI {self.url} ---\n")
-                log_file.flush()
-                self.server_process = subprocess.Popen(
-                    cmd,
-                    cwd=str(ROOT_DIR),
-                    env=env,
-                    stdout=log_file,
-                    stderr=subprocess.STDOUT,
-                    startupinfo=startupinfo,
-                    creationflags=creationflags,
-                )
-            except Exception as e:
-                log_message(f"Lỗi khởi động server: {e}")
+                from app.db.database import ensure_database
+                from app.main import app
 
-            if self.icon:
-                self.icon.title = f"AI Prompt Studio ({self.url})"
+                ensure_database()
+
+                config = uvicorn.Config(
+                    app,
+                    host=self.host,
+                    port=self.port,
+                    log_level="warning",
+                )
+                self.server = uvicorn.Server(config)
+                self.server_thread = threading.Thread(target=self.server.run, daemon=True)
+                self.server_thread.start()
+
+                # Lưu URL vào file để instance sau có thể đọc và mở web
+                try:
+                    URL_FILE_PATH.write_text(self.url, encoding="utf-8")
+                except Exception:
+                    pass
+
+                if self.icon:
+                    self.icon.title = f"AI Prompt Studio ({self.url})"
+            except Exception as e:
+                import traceback
+                log_message(f"Lỗi khởi động server: {e}\n{traceback.format_exc()}")
 
     def stop_server(self):
-        """Dừng Uvicorn server subprocess và giải phóng cổng mạng."""
+        """Dừng Uvicorn server."""
         with self._lock:
-            if self.server_process:
-                pid = self.server_process.pid
-                log_message(f"🛑 Đang dừng server (PID: {pid})...")
-                terminate_process(self.server_process)
-                self.server_process = None
-                log_message("Đã dừng server thành công.")
+            if self.server:
+                log_message("Dừng server...")
+                self.server.should_exit = True
+                if self.server_thread and self.server_thread.is_alive():
+                    self.server_thread.join(timeout=3.0)
+                self.server = None
+                self.server_thread = None
+
+            try:
+                URL_FILE_PATH.unlink(missing_ok=True)
+            except Exception:
+                pass
 
     def restart_server(self):
-        """Khởi động lại server để nạp 100% mã nguồn Python/Frontend mới nhất."""
+        """Khởi động lại server."""
         if self._is_restarting:
             return
         self._is_restarting = True
 
         def _do_restart():
             try:
-                log_message("🔄 ĐANG KHỞI ĐỘNG LẠI SERVER ĐỂ NẠP CODE MỚI...")
-
+                log_message("Khởi động lại server...")
                 if self.icon:
                     try:
-                        self.icon.notify(
-                            "Đang nạp lại mã nguồn mới nhất...",
-                            "AI Prompt Studio - Restarting",
-                        )
+                        self.icon.notify("Đang khởi động lại server...", "AI Prompt Studio")
                     except Exception:
                         pass
-
                 self.stop_server()
                 time.sleep(0.5)
                 self.start_server(reuse_port=True)
-
-                # Mở lại trình duyệt sau khi server khởi động
-                time.sleep(1.2)
+                time.sleep(0.5)
                 self.open_browser()
-
-                if self.icon:
-                    try:
-                        self.icon.notify(
-                            f"Đã cập nhật code mới và khởi động lại tại:\n{self.url}",
-                            "Khởi Động Lại Thành Công",
-                        )
-                    except Exception:
-                        pass
-
-                log_message(f"✅ Đã khởi động lại thành công tại: {self.url}")
             finally:
                 self._is_restarting = False
 
         threading.Thread(target=_do_restart, daemon=True).start()
 
     def open_browser(self):
-        """Mở trình duyệt web tới trang quản trị."""
+        """Mở giao diện web trên trình duyệt mặc định."""
         try:
             webbrowser.open(self.url)
         except Exception as e:
             log_message(f"Không thể mở trình duyệt: {e}")
 
     def open_log_file(self):
-        """Mở tệp tin server.log bằng ứng dụng mặc định (Notepad)."""
+        """Mở file server.log."""
         try:
             if LOG_FILE_PATH.exists():
                 os.startfile(str(LOG_FILE_PATH))
         except Exception as e:
-            log_message(f"Không thể mở file log: {e}")
+            log_message(f"Không thể mở log: {e}")
+
+    def open_env_file(self):
+        """Mở tệp .env mặc định bằng Notepad của Windows."""
+        from app.config import ENV_PATH, BASE_DIR
+        import subprocess, shutil
+        try:
+            if not ENV_PATH.exists():
+                example = BASE_DIR / ".env.example"
+                if example.exists():
+                    shutil.copyfile(example, ENV_PATH)
+                else:
+                    ENV_PATH.write_text("SETUP_DONE=false\nAFFILIATE_ROOT=\n", encoding="utf-8")
+            subprocess.Popen(["notepad.exe", str(ENV_PATH)])
+            log_message(f"Đã mở Notepad chỉnh sửa {ENV_PATH}")
+        except Exception as e:
+            log_message(f"Không thể mở file .env bằng Notepad: {e}")
+
+    def trigger_backup(self):
+        """Sao lưu database ngay lập tức từ tray icon."""
+        from app.config import backup_database, get_backup_dir
+        bk_dir = get_backup_dir()
+        if not bk_dir:
+            log_message("Chưa thiết lập AFFILIATE_ROOT trong file .env để sao lưu!")
+            if self.icon:
+                try:
+                    self.icon.notify("Chưa thiết lập AFFILIATE_ROOT trong .env!", "AI Prompt Studio")
+                except Exception:
+                    pass
+            return
+
+        bk = backup_database()
+        if bk:
+            log_message(f"Đã sao lưu database thành công: {bk}")
+            if self.icon:
+                try:
+                    self.icon.notify(f"Đã sao lưu thành công tại:\n{bk.name}", "Sao Lưu Database")
+                except Exception:
+                    pass
+        else:
+            log_message("Sao lưu database thất bại!")
+            if self.icon:
+                try:
+                    self.icon.notify("Không tìm thấy database hoặc lỗi sao lưu.", "Lỗi Sao Lưu")
+                except Exception:
+                    pass
+
+    def open_app_dir(self):
+        """Mở thư mục cài đặt ứng dụng."""
+        from app.config import BASE_DIR
+        try:
+            os.startfile(str(BASE_DIR))
+        except Exception as e:
+            log_message(f"Không thể mở thư mục cài đặt: {e}")
 
     def quit(self):
-        """Thoát hoàn toàn ứng dụng."""
-        log_message("❌ Đang tắt AI Prompt Studio...")
+        """Thoát hoàn toàn ứng dụng và tự động sao lưu database."""
+        log_message("Thoát AI Prompt Studio...")
+        try:
+            from app.config import backup_database
+            bk = backup_database()
+            if bk:
+                log_message(f"Đã tự động sao lưu database trước khi thoát: {bk}")
+        except Exception as e:
+            log_message(f"Lỗi sao lưu database khi thoát: {e}")
+
         self.stop_server()
         if self.icon:
             self.icon.stop()
-        log_message("Tạm biệt!")
+        if self._mutex:
+            try:
+                ctypes.windll.kernel32.CloseHandle(self._mutex)
+            except Exception:
+                pass
+            self._mutex = None
         os._exit(0)
 
     def run(self):
-        """Chạy vòng lặp chính của Tray Application."""
+        """Vòng lặp chính của Tray App."""
         atexit.register(self.stop_server)
 
         def handle_signal(sig, frame):
@@ -347,24 +327,25 @@ class TrayApp:
         except Exception:
             pass
 
-        # 1. Khởi động server subprocess
         self.start_server(reuse_port=False)
 
-        # 2. Mở trình duyệt web tự động sau 1.2 giây
+        # Tự động mở trình duyệt sau khi server chạy
         def auto_open():
-            time.sleep(1.2)
+            time.sleep(1.0)
             self.open_browser()
 
         threading.Thread(target=auto_open, daemon=True).start()
 
-        # 3. Khởi tạo Tray Icon & Menu ngữ cảnh
         image = load_icon_image()
         menu = Menu(
             item("🌐 Mở Giao Diện Web", lambda icon, item: self.open_browser(), default=True),
-            item("🔄 Khởi Động Lại (Restart)", lambda icon, item: self.restart_server()),
-            item("📄 Xem File Log (server.log)", lambda icon, item: self.open_log_file()),
+            item("⚙️ Cấu hình .env", lambda icon, item: self.open_env_file()),
+            item("💾 Sao Lưu Database", lambda icon, item: self.trigger_backup()),
+            item("📁 Thư Mục Cài Đặt", lambda icon, item: self.open_app_dir()),
+            item("🔄 Khởi Động Lại", lambda icon, item: self.restart_server()),
+            item("📄 Xem Log", lambda icon, item: self.open_log_file()),
             Menu.SEPARATOR,
-            item("❌ Thoát (Quit)", lambda icon, item: self.quit()),
+            item("❌ Thoát", lambda icon, item: self.quit()),
         )
 
         self.icon = pystray.Icon(
@@ -373,12 +354,35 @@ class TrayApp:
             title=f"AI Prompt Studio ({self.url})",
             menu=menu,
         )
-
-        # Chạy message loop của Windows tray icon (blocking main thread)
         self.icon.run()
 
 
 def run_tray_app():
-    """Hàm entry point chạy Tray App."""
-    app = TrayApp()
+    """Kiểm tra Single Instance trước khi chạy."""
+    kernel32 = ctypes.windll.kernel32
+    kernel32.CreateMutexW.argtypes = [ctypes.c_void_p, ctypes.c_bool, ctypes.c_wchar_p]
+    kernel32.CreateMutexW.restype = ctypes.c_void_p
+    kernel32.CloseHandle.argtypes = [ctypes.c_void_p]
+    kernel32.CloseHandle.restype = ctypes.c_bool
+
+    mutex = kernel32.CreateMutexW(None, False, MUTEX_NAME)
+    if kernel32.GetLastError() == ERROR_ALREADY_EXISTS:
+        if mutex:
+            kernel32.CloseHandle(mutex)
+        # Đã có phiên bản đang chạy -> mở web và thoát
+        target_url = "http://127.0.0.1:8000"
+        for _ in range(15):
+            if URL_FILE_PATH.exists():
+                try:
+                    saved = URL_FILE_PATH.read_text(encoding="utf-8").strip()
+                    if saved.startswith("http"):
+                        target_url = saved
+                        break
+                except Exception:
+                    pass
+            time.sleep(0.1)
+        webbrowser.open(target_url)
+        sys.exit(0)
+
+    app = TrayApp(mutex_handle=mutex)
     app.run()

@@ -104,6 +104,16 @@ class PromptRepository:
                     ORDER BY order_index ASC, id ASC
                 """, prompt_ids)
                 img_rows = cursor.fetchall()
+                from urllib.parse import quote
+                from app.services.s3_storage import get_presigned_url
+                for r in img_rows:
+                    raw_target = r.get("url") or r.get("filename") or ""
+                    if raw_target:
+                        r["s3_url"] = get_presigned_url(raw_target)
+                        if raw_target.startswith("data:"):
+                            r["url"] = raw_target
+                        else:
+                            r["url"] = f"/api/media/proxy?url={quote(raw_target)}"
                 img_map = {}
                 for r in img_rows:
                     img_map.setdefault(r["prompt_id"], []).append(r)
@@ -158,7 +168,18 @@ class PromptRepository:
                 WHERE prompt_id = ?
                 ORDER BY order_index ASC, id ASC
             """, (prompt_id,))
-            prompt["images"] = cursor.fetchall()
+            img_rows = cursor.fetchall()
+            from urllib.parse import quote
+            from app.services.s3_storage import get_presigned_url
+            for r in img_rows:
+                raw_target = r.get("url") or r.get("filename") or ""
+                if raw_target:
+                    r["s3_url"] = get_presigned_url(raw_target)
+                    if raw_target.startswith("data:"):
+                        r["url"] = raw_target
+                    else:
+                        r["url"] = f"/api/media/proxy?url={quote(raw_target)}"
+            prompt["images"] = img_rows
 
             # Fetch sample contents
             cursor.execute("""

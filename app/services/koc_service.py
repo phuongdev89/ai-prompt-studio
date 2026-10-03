@@ -37,7 +37,14 @@ def find_koc_script() -> Tuple[Path, Path]:
         elif p.is_dir():
             script_candidates.append(p / "list.py")
 
-    # 2. Sibling directory: <workspace_parent>/koc_management/list.py
+    # 2. AFFILIATE_ROOT from .env
+    from app.config import get_affiliate_root
+    aff_root = get_affiliate_root()
+    if aff_root:
+        script_candidates.append(aff_root / "koc_management" / "list.py")
+        script_candidates.append(aff_root / "04_Tools" / "koc_management" / "list.py")
+
+    # 3. Sibling directory: <workspace_parent>/koc_management/list.py
     current_file = Path(__file__).resolve()
     # app/services/koc_service.py -> app/services -> app -> ai_prompts_database -> 04_Tools
     tools_dir = current_file.parent.parent.parent.parent
@@ -145,15 +152,28 @@ def get_koc_names_and_counts(refresh: bool = False) -> List[Dict[str, Any]]:
         first_thumb = (first_img.get("thumb") or first_img.get("thumb_url") or first_img.get("thumb_path")) if first_img else None
 
         # Cover URL: prioritize thumbnail for fast loading (30KB-80KB), fall back to original url/path
-        cover_url = first_thumb or (first_img.get("url") or first_img.get("presigned_url") if first_img else None)
-        if not cover_url and first_path:
+        from app.services.s3_storage import get_presigned_url
+        raw_cover = first_thumb or (first_img.get("url") or first_img.get("presigned_url") if first_img else None)
+        if not raw_cover and first_path:
             cover_url = f"/api/koc/image?path={quote(first_path)}"
+        elif raw_cover and raw_cover.startswith(("http://", "https://")):
+            cover_url = f"/api/media/proxy?url={quote(raw_cover)}"
+        else:
+            cover_url = raw_cover or ""
+
+        raw_thumb = first_thumb or raw_cover
+        if not raw_thumb and first_path:
+            final_thumb = cover_url
+        elif raw_thumb and raw_thumb.startswith(("http://", "https://")):
+            final_thumb = f"/api/media/proxy?url={quote(raw_thumb)}"
+        else:
+            final_thumb = raw_thumb or cover_url
 
         results.append({
             "name": name,
             "count": len(images),
             "cover_path": first_path,
-            "cover_thumb": first_thumb or cover_url,
+            "cover_thumb": final_thumb,
             "cover_url": cover_url,
         })
     return results
@@ -183,9 +203,17 @@ def get_images_for_koc(koc_name: str, refresh: bool = False) -> List[Dict[str, A
             presigned = path_str
 
         # Web URL for original full-resolution image (prioritize presigned S3 URL)
-        web_url = img.get("url") or presigned
-        if not web_url and path_str:
-            web_url = f"/api/koc/image?path={quote(path_str)}"
+        from app.services.s3_storage import get_presigned_url
+        raw_web = img.get("url") or presigned
+        if not raw_web and path_str:
+            display_web_url = f"/api/koc/image?path={quote(path_str)}"
+            s3_web_url = display_web_url
+        elif raw_web and raw_web.startswith(("http://", "https://")):
+            s3_web_url = get_presigned_url(raw_web)
+            display_web_url = f"/api/media/proxy?url={quote(raw_web)}"
+        else:
+            display_web_url = raw_web or ""
+            s3_web_url = display_web_url
 
         # Thumbnail URL: prioritize thumb/thumb_url from koc_management (30KB-80KB vs 2-5MB)
         thumb_str = img.get("thumb") or img.get("thumb_url") or img.get("thumb_path") or ""
@@ -193,27 +221,35 @@ def get_images_for_koc(koc_name: str, refresh: bool = False) -> List[Dict[str, A
         if not thumb_presigned and thumb_str.startswith(("http://", "https://")):
             thumb_presigned = thumb_str
 
-        thumb_web_url = img.get("thumb_url") or thumb_presigned or thumb_str
-        if not thumb_web_url:
+        raw_thumb = img.get("thumb_url") or thumb_presigned or thumb_str
+        if not raw_thumb:
             thumb_local = img.get("thumb_local_path") or ""
             if thumb_local:
-                thumb_web_url = f"/api/koc/image?path={quote(thumb_local)}"
+                display_thumb_url = f"/api/koc/image?path={quote(thumb_local)}"
+                s3_thumb_url = display_thumb_url
             else:
-                # 100% backward-compatible fallback to original image url
-                thumb_web_url = web_url
+                display_thumb_url = display_web_url
+                s3_thumb_url = s3_web_url
+        elif raw_thumb.startswith(("http://", "https://")):
+            s3_thumb_url = get_presigned_url(raw_thumb)
+            display_thumb_url = f"/api/media/proxy?url={quote(raw_thumb)}"
+        else:
+            display_thumb_url = raw_thumb
+            s3_thumb_url = raw_thumb
 
         results.append({
             "name": img.get("name") or Path(path_str).name,
             "path": path_str,
             "image": img.get("image") or path_str,
-            "url": web_url,
-            "presigned_url": presigned or web_url,
+            "url": display_web_url,
+            "presigned_url": s3_web_url,
+            "s3_url": s3_web_url,
             "local_path": img.get("local_path") or (path_str if not path_str.startswith(("http://", "https://")) else ""),
             "s3_path": img.get("s3_path") or "",
             "s3_key": img.get("s3_key") or "",
             "rel_path": img.get("rel_path", ""),
-            "thumb": thumb_web_url,
-            "thumb_url": thumb_web_url,
+            "thumb": display_thumb_url,
+            "thumb_url": display_thumb_url,
             "thumb_path": img.get("thumb_path") or thumb_web_url,
             "thumb_rel_path": img.get("thumb_rel_path", ""),
             "thumb_local_path": img.get("thumb_local_path", ""),

@@ -106,7 +106,11 @@ def call_ai_generate_video(
         "duration": duration
     }
     if reference_media:
-        if reference_media.startswith("data:") or reference_media.startswith("http"):
+        from app.services.s3_storage import resolve_ai_media_url
+        clean_ref = resolve_ai_media_url(reference_media, cfg=cfg)
+        if clean_ref:
+            payload["image_url"] = clean_ref
+        elif reference_media.startswith("data:") or reference_media.startswith("http"):
             payload["image_url"] = reference_media
 
     ctx = ssl.create_default_context()

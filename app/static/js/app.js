@@ -477,6 +477,7 @@ document.addEventListener('DOMContentLoaded', () => {
     initEventListeners();
     fetchStats();
     pingAiConnection(false); // Ping AI on startup
+    checkSetupStatus(); // Kiểm tra trạng thái cấu hình .env
 
     // Parse current route from browser URL (Clean path, NO '#')
     const route = parseCurrentRoute();
@@ -1039,8 +1040,14 @@ async function selectPrompt(promptId, updateRoute = true) {
         if (sidebarOverlay) sidebarOverlay.classList.add('hidden');
     }
 
-    // Hiển thị loading có backdrop ở khung bên phải
+    // Hiển thị loading có backdrop ở khung bên phải và loading spinner cho ảnh/video
     showDetailLoading();
+    const mediaSpinner = document.getElementById('mediaLoadingSpinner');
+    if (mediaSpinner) mediaSpinner.classList.remove('hidden');
+    const curImg = document.getElementById('currentSliderImg');
+    if (curImg) curImg.classList.add('opacity-0');
+    const curVid = document.getElementById('currentSliderVideo');
+    if (curVid) curVid.classList.add('opacity-0');
 
     try {
         const res = await fetch(`/api/prompts/${promptId}`);
@@ -1196,6 +1203,8 @@ function renderSlider(images) {
     const expandBtn = document.getElementById('sliderExpandBtn');
 
     if (!images || images.length === 0) {
+        const spinner = document.getElementById('mediaLoadingSpinner');
+        if (spinner) spinner.classList.add('hidden');
         sliderImg.classList.add('hidden');
         if (sliderVideo) {
             sliderVideo.classList.add('hidden');
@@ -1242,11 +1251,22 @@ function renderSlider(images) {
 }
 
 function getImageSource(img) {
-    if (typeof img === 'string') return img;
-    if (img.status === 'downloaded' && img.filename) {
-        return `/media/${img.filename}`;
+    if (!img) return '';
+    if (typeof img === 'string') {
+        if (img.startsWith('/api/media/proxy') || img.startsWith('data:') || img.startsWith('/media/')) return img;
+        return `/api/media/proxy?url=${encodeURIComponent(img)}`;
     }
-    return img.url || '';
+    // Ưu tiên hiển thị thông qua proxy (proxy sẽ lưu thumbnail vào thư mục và tải từ đĩa cục bộ)
+    if (img.url) {
+        return img.url;
+    }
+    if (img.filename) {
+        return `/api/media/proxy?url=${encodeURIComponent(img.filename)}`;
+    }
+    if (img.s3_url) {
+        return `/api/media/proxy?url=${encodeURIComponent(img.s3_url)}`;
+    }
+    return '';
 }
 
 function updateSlideImage(images, index) {
@@ -1255,23 +1275,57 @@ function updateSlideImage(images, index) {
     const src = getImageSource(imgObj);
     const sliderImg = document.getElementById('currentSliderImg');
     const sliderVideo = document.getElementById('currentSliderVideo');
+    const spinner = document.getElementById('mediaLoadingSpinner');
     const isVideo = !!(src && src.match(/\.(mp4|webm|mov|avi)(\?.*)?$/i));
 
+    if (spinner) spinner.classList.remove('hidden');
+
     if (isVideo && sliderVideo) {
-        if (sliderImg) sliderImg.classList.add('hidden');
+        if (sliderImg) {
+            sliderImg.classList.add('hidden');
+            sliderImg.onload = null;
+            sliderImg.onerror = null;
+        }
         sliderVideo.classList.remove('hidden');
+        sliderVideo.classList.add('opacity-0');
+
+        sliderVideo.onloadeddata = () => {
+            if (spinner) spinner.classList.add('hidden');
+            sliderVideo.classList.remove('opacity-0');
+        };
+        sliderVideo.onerror = () => {
+            if (spinner) spinner.classList.add('hidden');
+            sliderVideo.classList.remove('opacity-0');
+        };
         if (sliderVideo.src !== src) {
             sliderVideo.src = src;
+        } else {
+            if (spinner) spinner.classList.add('hidden');
+            sliderVideo.classList.remove('opacity-0');
         }
     } else {
         if (sliderVideo) {
             sliderVideo.classList.add('hidden');
             sliderVideo.pause();
+            sliderVideo.onloadeddata = null;
+            sliderVideo.onerror = null;
         }
         if (sliderImg) {
             sliderImg.classList.remove('hidden');
+            sliderImg.classList.add('opacity-0');
+            sliderImg.dataset.remoteUrl = typeof imgObj === 'object' ? (imgObj.s3_url || imgObj.url) : imgObj;
+
+            sliderImg.onload = () => {
+                if (spinner) spinner.classList.add('hidden');
+                sliderImg.classList.remove('opacity-0');
+            };
+            sliderImg.onerror = () => {
+                if (spinner) spinner.classList.add('hidden');
+                sliderImg.classList.remove('opacity-0');
+                handleImgError(sliderImg);
+            };
+
             sliderImg.src = src;
-            sliderImg.dataset.remoteUrl = typeof imgObj === 'object' ? imgObj.url : imgObj;
         }
     }
 
@@ -1310,16 +1364,43 @@ function goToSlide(index) {
     updateSlideImage(images, currentSlideIndex);
 }
 
-function handleImgError(img) {
-    // If local image fails, fallback to remote URL
-    if (img.dataset.remoteUrl && img.src !== img.dataset.remoteUrl) {
-        img.src = img.dataset.remoteUrl;
-    } else {
+async function handleImgError(img) {
+    if (img.dataset.retried) {
         img.src = "https://placehold.co/600x600/1e293b/64748b?text=Image+Unavailable";
+        return;
     }
+    img.dataset.retried = "1";
+    const src = img.dataset.remoteUrl || img.src;
+    if (src && (src.includes("backblazeb2.com") || src.includes("amazonaws.com") || src.includes("r2.cloudflarestorage.com"))) {
+        try {
+            const resp = await fetch(`/api/s3/presign?url=${encodeURIComponent(src)}`);
+            const data = await resp.json();
+            if (data.url && data.url !== src) {
+                img.src = data.url;
+                return;
+            }
+        } catch (e) {}
+    }
+    img.src = "https://placehold.co/600x600/1e293b/64748b?text=Image+Unavailable";
 }
 
-function handleThumbError(img) {
+async function handleThumbError(img) {
+    if (img.dataset.retried) {
+        img.src = "https://placehold.co/100x100/1e293b/64748b?text=Img";
+        return;
+    }
+    img.dataset.retried = "1";
+    const src = img.src;
+    if (src && (src.includes("backblazeb2.com") || src.includes("amazonaws.com") || src.includes("r2.cloudflarestorage.com"))) {
+        try {
+            const resp = await fetch(`/api/s3/presign?url=${encodeURIComponent(src)}`);
+            const data = await resp.json();
+            if (data.url && data.url !== src) {
+                img.src = data.url;
+                return;
+            }
+        } catch (e) {}
+    }
     img.src = "https://placehold.co/100x100/1e293b/64748b?text=Img";
 }
 
@@ -7620,6 +7701,62 @@ async function doSyncPull() {
     }
     btn.disabled = false;
     btn.innerHTML = '<i class="fa-solid fa-download mr-1"></i> Tải về';
+}
+
+// ============================================================
+//  SETUP & CONFIGURATION (.env)
+// ============================================================
+
+async function checkSetupStatus() {
+    try {
+        const res = await fetch('/api/config');
+        if (!res.ok) return;
+        const cfg = await res.json();
+        const envDisp = document.getElementById('setupEnvPathDisplay');
+        if (envDisp && cfg.env_path) {
+            envDisp.textContent = cfg.env_path;
+        }
+        const banner = document.getElementById('setupBanner');
+        if (!cfg.setup_done) {
+            if (banner) banner.classList.remove('hidden');
+            // Tự động mở modal hướng dẫn khi mới vào nếu chưa cấu hình
+            openSetupGuideModal();
+        } else {
+            if (banner) banner.classList.add('hidden');
+        }
+    } catch (e) {
+        console.warn('Could not check setup status', e);
+    }
+}
+
+function openSetupGuideModal() {
+    const modal = document.getElementById('setupGuideModal');
+    if (modal) modal.classList.remove('hidden');
+}
+
+function closeSetupGuideModal() {
+    const modal = document.getElementById('setupGuideModal');
+    if (modal) modal.classList.add('hidden');
+}
+
+async function openEnvFile() {
+    try {
+        const resp = await fetch('/api/config/open-env', { method: 'POST' });
+        const data = await resp.json();
+        showToast(data.message || 'Đã mở file .env');
+    } catch (e) {
+        showToast('Không thể mở file .env');
+    }
+}
+
+async function openEnvDir() {
+    try {
+        const resp = await fetch('/api/config/open-dir', { method: 'POST' });
+        const data = await resp.json();
+        showToast(data.message || 'Đã mở thư mục cài đặt');
+    } catch (e) {
+        showToast('Không thể mở thư mục');
+    }
 }
 
 // ============================================================

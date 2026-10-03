@@ -2,6 +2,7 @@ import os
 import sys
 import socket
 from pathlib import Path
+from typing import Optional
 
 # Paths — frozen exe vs dev
 if getattr(sys, "frozen", False):
@@ -11,16 +12,24 @@ if getattr(sys, "frozen", False):
     STATIC_DIR = APP_DIR / "static"
     TEMPLATES_DIR = APP_DIR / "templates"
     DATA_DIR = BASE_DIR / "data"
+    _INTERNAL_DATA = _INTERNAL / "data"
+    JSON_DATA_PATH = DATA_DIR / "cleaned_prompts.json" if (DATA_DIR / "cleaned_prompts.json").exists() else _INTERNAL_DATA / "cleaned_prompts.json"
 else:
     BASE_DIR = Path(__file__).resolve().parent.parent
+    _INTERNAL = BASE_DIR
     APP_DIR = BASE_DIR / "app"
     STATIC_DIR = APP_DIR / "static"
     TEMPLATES_DIR = APP_DIR / "templates"
     DATA_DIR = BASE_DIR / "data"
+    JSON_DATA_PATH = DATA_DIR / "cleaned_prompts.json"
 
+DATA_DIR.mkdir(parents=True, exist_ok=True)
 DB_PATH = DATA_DIR / "prompts.db"
-JSON_DATA_PATH = DATA_DIR / "cleaned_prompts.json"
 IMAGES_DIR = DATA_DIR / "images"
+IMAGES_DIR.mkdir(parents=True, exist_ok=True)
+THUMBNAILS_DIR = DATA_DIR / "thumbnails"
+THUMBNAILS_DIR.mkdir(parents=True, exist_ok=True)
+
 ENV_PATH = BASE_DIR / ".env"
 
 # Server — always random port, localhost only
@@ -68,6 +77,7 @@ _DEFAULT_CONFIG = {
     "s3_key_prefix": "references",
     "s3_koc_prefix": "koc_management",
     "setup_done": False,
+    "affiliate_root": "",
 }
 
 
@@ -98,6 +108,7 @@ _ENV_KEY_MAP = {
     "S3_KEY_PREFIX": "s3_key_prefix",
     "S3_KOC_PREFIX": "s3_koc_prefix",
     "SETUP_DONE": "setup_done",
+    "AFFILIATE_ROOT": "affiliate_root",
 }
 
 _BOOL_KEYS = {"image_reference_support", "stream", "s3_enabled", "setup_done"}
@@ -124,18 +135,76 @@ def _read_env_file() -> dict:
         return {}
 
     values = {}
-    for raw_line in ENV_PATH.read_text("utf-8").splitlines():
-        line = raw_line.strip()
-        if not line or line.startswith("#") or "=" not in line:
-            continue
-        env_key, value = line.split("=", 1)
-        env_key = env_key.strip()
-        config_key = _ENV_KEY_MAP.get(env_key)
-        if not config_key:
-            continue
-        value = value.strip().strip('"').strip("'")
-        values[config_key] = _coerce_env_value(config_key, value)
+    try:
+        for raw_line in ENV_PATH.read_text("utf-8").splitlines():
+            line = raw_line.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            env_key, value = line.split("=", 1)
+            env_key = env_key.strip()
+            config_key = _ENV_KEY_MAP.get(env_key)
+            if not config_key:
+                continue
+            value = value.strip().strip('"').strip("'")
+            values[config_key] = _coerce_env_value(config_key, value)
+    except Exception:
+        pass
     return values
+
+
+def get_bundled_db_path() -> Optional[Path]:
+    """Tìm file prompts.db gốc đi kèm nếu có (không ship mặc định)."""
+    candidates = [
+        BASE_DIR / "data" / "prompts.db",
+        _INTERNAL / "data" / "prompts.db",
+    ]
+    for p in candidates:
+        if p.exists() and p.resolve() != DB_PATH.resolve():
+            return p
+    return None
+
+
+def get_affiliate_root() -> Optional[Path]:
+    """Lấy thư mục gốc AFFILIATE_ROOT từ file .env nếu có."""
+    saved = _read_env_file()
+    aff_root = saved.get("affiliate_root", "").strip()
+    if aff_root:
+        return Path(aff_root)
+    return None
+
+
+def get_backup_dir() -> Optional[Path]:
+    """Thư mục sao lưu database: $AFFILIATE_ROOT/05_Storage/03_Tool_Backups/ai_prompts_database."""
+    root = get_affiliate_root()
+    if root:
+        return root / "05_Storage" / "03_Tool_Backups" / "ai_prompts_database"
+    return None
+
+
+def backup_database() -> Optional[Path]:
+    """
+    Tạo bản sao lưu database kèm timestamp đầy đủ vào thư mục:
+    $AFFILIATE_ROOT/05_Storage/03_Tool_Backups/ai_prompts_database/prompts_backup_YYYYMMDD_HHMMSS.db
+    """
+    import shutil
+    import datetime
+
+    if not DB_PATH.exists():
+        return None
+
+    bk_dir = get_backup_dir()
+    if not bk_dir:
+        return None
+
+    try:
+        bk_dir.mkdir(parents=True, exist_ok=True)
+        timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+        dest_file = bk_dir / f"prompts_backup_{timestamp}.db"
+        shutil.copy2(DB_PATH, dest_file)
+        return dest_file
+    except Exception as e:
+        print(f"[!] Lỗi khi sao lưu database: {e}")
+        return None
 
 
 def get_ai_config() -> dict:
@@ -147,7 +216,7 @@ def get_ai_config() -> dict:
               "image_url", "image_api_key", "video_url", "video_api_key",
               "model", "chat_model", "image_model", "image_type", "video_model",
               "s3_endpoint_url", "s3_region", "s3_bucket", "s3_access_key_id",
-              "s3_secret_access_key", "s3_key_prefix", "s3_koc_prefix"):
+              "s3_secret_access_key", "s3_key_prefix", "s3_koc_prefix", "affiliate_root"):
         if isinstance(merged.get(k), str):
             merged[k] = merged[k].strip().strip('"').strip("'")
 
@@ -163,36 +232,19 @@ def get_ai_config() -> dict:
         merged["base_url"] = merged["image_url"]
     elif merged.get("chat_url"):
         merged["base_url"] = merged["chat_url"]
-    elif merged.get("base_url"):
-        merged["base_url"] = merged["base_url"].rstrip("/")
 
-    if not merged.get("api_key"):
-        merged["api_key"] = merged.get("image_api_key") or merged.get("chat_api_key") or ""
+    if merged.get("image_api_key"):
+        merged["api_key"] = merged["image_api_key"]
+    elif merged.get("chat_api_key"):
+        merged["api_key"] = merged["chat_api_key"]
 
-    if merged.get("s3_endpoint_url"):
-        merged["s3_endpoint_url"] = merged["s3_endpoint_url"].rstrip("/")
-
-    # Chat models
-    raw_chat = merged.get("chat_model") or merged.get("model") or "ag/gemini-3.8-flash-high"
-    merged["raw_chat_models"] = raw_chat
-    chat_models_list = [m.strip() for m in raw_chat.split(",") if m.strip()]
-    merged["chat_models"] = chat_models_list if chat_models_list else [raw_chat or "ag/gemini-3.8-flash-high"]
-    merged["default_chat_model"] = merged["chat_models"][0]
-    merged["chat_model"] = merged["default_chat_model"]
-    merged["model"] = merged["default_chat_model"]
-    merged["model_name"] = merged["default_chat_model"]
-
-    # Image models
-    raw_img = merged.get("image_model") or "cx/gpt-5.6-sol-image"
-    merged["raw_image_models"] = raw_img
-    models_list = [m.strip() for m in raw_img.split(",") if m.strip()]
-    merged["image_models"] = models_list if models_list else [raw_img or "cx/gpt-5.6-sol-image"]
+    raw_img = merged.get("image_model", "")
+    img_models_list = [m.strip() for m in raw_img.split(",") if m.strip()]
+    merged["image_models"] = img_models_list if img_models_list else ["cx/gpt-5.6-sol-image"]
     merged["default_image_model"] = merged["image_models"][0]
     merged["image_model"] = merged["default_image_model"]
 
-    # Video models
-    raw_vid = merged.get("video_model") or "grok-imagine-video"
-    merged["raw_video_models"] = raw_vid
+    raw_vid = merged.get("video_model", "")
     vid_models_list = [m.strip() for m in raw_vid.split(",") if m.strip()]
     merged["video_models"] = vid_models_list if vid_models_list else ["zpro-payg/grok-imagine-video", "grok-imagine-video"]
     merged["default_video_model"] = merged["video_models"][0]
@@ -206,8 +258,11 @@ def save_ai_config(new_config: dict) -> None:
 
 
 def is_setup_done() -> bool:
+    """Trả về True khi đã cấu hình SETUP_DONE và AFFILIATE_ROOT."""
     cfg = get_ai_config()
-    return bool(cfg.get("setup_done") or cfg.get("api_key"))
+    setup_done = bool(cfg.get("setup_done", False))
+    affiliate_root = bool(cfg.get("affiliate_root", "").strip())
+    return setup_done and affiliate_root
 
 
 def get_video_models() -> list:

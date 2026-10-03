@@ -31,13 +31,17 @@ hidden_imports = [
     'fastapi',
     'pydantic',
     'sqlite3',
-    'webview',
+    'pystray',
+    'pystray._win32',
+    'PIL',
+    'PIL.Image',
+    'PIL.ImageDraw',
+    'ctypes',
 ] + collect_submodules('app')
 
 datas = [
     (os.path.join(ROOT_DIR, 'app', 'templates'), 'app/templates'),
     (os.path.join(ROOT_DIR, 'app', 'static'), 'app/static'),
-    (os.path.join(ROOT_DIR, 'data', 'cleaned_prompts.json'), 'data'),
     (os.path.join(ROOT_DIR, 'assets'), 'assets'),
 ]
 
@@ -45,7 +49,6 @@ datas = [
 version_file = os.path.join(ROOT_DIR, '.version')
 if os.path.exists(version_file):
     datas.append((version_file, '.'))
-
 
 # Optional certifi bundle
 try:
@@ -58,7 +61,7 @@ icon_path = os.path.join(ROOT_DIR, 'assets', 'icon.ico')
 icon_file = icon_path if os.path.exists(icon_path) else None
 
 a = Analysis(
-    [os.path.join(ROOT_DIR, 'desktop.py')],
+    [os.path.join(ROOT_DIR, 'run_tray.py')],
     pathex=[ROOT_DIR],
     binaries=[],
     datas=datas,
@@ -66,7 +69,7 @@ a = Analysis(
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
-    excludes=['tkinter', 'matplotlib', 'scipy', 'torch', 'notebook', 'PIL'],
+    excludes=['tkinter', 'matplotlib', 'scipy', 'torch', 'notebook'],
     win_no_prefer_redirects=False,
     win_private_assemblies=False,
     cipher=block_cipher,
